@@ -1,0 +1,98 @@
+import { ls } from "./utils.js";
+
+const BASE = "/api";
+let demo = false;
+export const isDemo = () => demo;
+
+async function request(path, options = {}) {
+  const token = ls.get("bm_token");
+  const headers = { "Content-Type": "application/json" };
+  if (token && !token.startsWith("demo:"))
+    headers.Authorization = "Bearer " + token;
+  let res;
+  try {
+    res = await fetch(BASE + path, { ...options, headers });
+  } catch {
+    return mock(path, options); // backend unreachable
+  }
+  if (!(res.headers.get("content-type") || "").includes("json"))
+    return mock(path, options);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  demo = false;
+  return data;
+}
+
+// Demo mode: when the Express API is not running, accounts and orders are kept in this browser only.
+function mock(path, options) {
+  demo = true;
+  const body = options.body ? JSON.parse(options.body) : {};
+  const method = options.method || "GET";
+  const d = JSON.parse(ls.get("bm_demo") || '{"users":[],"orders":[]}');
+  const save = () => ls.set("bm_demo", JSON.stringify(d));
+  const uid = Number((ls.get("bm_token") || "").split(":")[1]);
+  const me = d.users.find((u) => u.id === uid);
+  const pub = ({ password, ...u }) => u;
+
+  if (path === "/auth/register") {
+    if (d.users.some((u) => u.email === body.email))
+      throw new Error("This email is already registered");
+    const u = { id: Date.now(), address: "", ...body };
+    d.users.push(u);
+    save();
+    return { token: "demo:" + u.id, user: pub(u) };
+  }
+  if (path === "/auth/login") {
+    const u = d.users.find(
+      (x) => x.email === body.email && x.password === body.password,
+    );
+    if (!u) throw new Error("Wrong email or password");
+    return { token: "demo:" + u.id, user: pub(u) };
+  }
+  if (!me) throw new Error(path === "/products" ? "offline" : "Please log in");
+  if (path === "/auth/me" && method === "GET") return pub(me);
+  if (path === "/auth/me") {
+    Object.assign(me, {
+      name: body.name,
+      phone: body.phone,
+      address: body.address,
+    });
+    save();
+    return pub(me);
+  }
+  if (path === "/orders" && method === "GET")
+    return d.orders.filter((o) => o.userId === me.id).reverse();
+  if (path === "/orders") {
+    const items = body.items.map((i) => ({
+      productId: i.id,
+      qty: i.qty,
+      name: i.name,
+      image: i.image,
+      price: i.price,
+    }));
+    const o = {
+      id: 1001 + d.orders.length,
+      userId: me.id,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      items,
+      total: items.reduce((s, i) => s + i.qty * i.price, 0),
+    };
+    d.orders.push(o);
+    save();
+    return { orderId: o.id, total: o.total };
+  }
+  throw new Error("offline");
+}
+
+export const getProducts = () => request("/products");
+export const registerUser = (f) =>
+  request("/auth/register", { method: "POST", body: JSON.stringify(f) });
+export const loginUser = (f) =>
+  request("/auth/login", { method: "POST", body: JSON.stringify(f) });
+export const getMe = () => request("/auth/me");
+export const updateMe = (f) =>
+  request("/auth/me", { method: "PUT", body: JSON.stringify(f) });
+export const getOrders = () => request("/orders");
+export const placeOrder = (o) =>
+  request("/orders", { method: "POST", body: JSON.stringify(o) });

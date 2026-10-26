@@ -1,3 +1,5 @@
+import logo from "../assets/idTO7v6m3N_logos.png";
+
 const cols = [
   [
     "Get to know Us",
@@ -43,7 +45,7 @@ export default function Footer() {
         ))}
       </div>
       <div className="foot-panel3">
-        <div className="logo1"></div>
+        <img className="logo1" src={logo} alt="Basemark" />
       </div>
       <div className="foot-panel4">
         <div className="pages">

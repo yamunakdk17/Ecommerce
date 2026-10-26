@@ -1,20 +1,21 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import ProductCard from "../components/ProductCard.jsx";
 import Icon from "../components/Icon.jsx";
-import { useStore } from "../context/StoreContext.jsx";
-import { useAuth } from "../context/AuthContext.jsx";
-import { categories } from "../data/products.js";
+import { useStore } from "../context/storeContext.js";
+import { useAuth } from "../context/authContext.js";
+import { categories } from "../data/Products.js";
 import { money, discount } from "../utils.js";
 
 export default function Product() {
   const { id } = useParams();
+  const location = useLocation();
   const { products, add } = useStore();
   const { user, setNext } = useAuth();
   const go = useNavigate();
   const [q, setQ] = useState(1);
   const [added, setAdded] = useState(false);
-  const p = products.find((x) => x.id === Number(id));
+  const p = products.find((x) => String(x.id) === id);
   if (!p)
     return (
       <div className="wrap">
@@ -27,6 +28,11 @@ export default function Product() {
     );
 
   const cat = categories.find((c) => c.slug === p.category);
+  const previousPage = location.state?.returnTo;
+  const backToProducts =
+    previousPage && !previousPage.startsWith("/product/")
+      ? previousPage
+      : `/shop/${p.category}`;
   const related = products
     .filter((x) => x.category === p.category && x.id !== p.id)
     .slice(0, 4);
@@ -50,6 +56,9 @@ export default function Product() {
         <Link to={"/shop/" + p.category}>{cat?.name}</Link> ›{" "}
         <span>{p.name}</span>
       </div>
+      <p className="product-back">
+        <Link to={backToProducts}>← Back to products</Link>
+      </p>
       <section className="section pd">
         <div className="pd-img">
           <img src={p.image} alt={p.name} />
@@ -58,10 +67,14 @@ export default function Product() {
           <h1>{p.name}</h1>
           <div className="stars">
             {"★".repeat(Math.round(p.rating))}
-            <span> {p.rating} rating</span>
+            <span>
+              {p.rating != null
+                ? ` ${p.rating} rating${p.reviewCount ? ` · ${p.reviewCount} reviews` : " · review count unavailable"}`
+                : " Rating unavailable"}
+            </span>
           </div>
           <p className="brand">
-            Brand: <b>Basemark</b>
+            Brand: <b>{p.brand || "Not provided"}</b>
           </p>
           <div className="pd-price">
             {money(p.price)}
@@ -83,6 +96,9 @@ export default function Product() {
               {p.stock > 0 ? `${p.stock} available` : "Out of stock"}
             </small>
           </div>
+          <p className="pd-subtotal">
+            Subtotal for {q}: <b>{money(Number(p.price) * q)}</b>
+          </p>
           <div className="pd-actions">
             <button className="btn" disabled={p.stock < 1} onClick={buy}>
               Buy Now
@@ -103,25 +119,21 @@ export default function Product() {
         <aside className="pd-side">
           <h4>Delivery Options</h4>
           <p>
-            <Icon name="truck" size={16} /> Standard delivery, 2 to 4 days
+            <Icon name="truck" size={16} /> Delivery options are confirmed at checkout.
           </p>
           <p>
             <Icon name="shield" size={16} /> Cash on Delivery available
           </p>
           <h4>Return &amp; Warranty</h4>
           <p>
-            <Icon name="rotate" size={16} /> 7 days easy return
+            <Icon name="rotate" size={16} /> Return and warranty details are not provided for this product.
           </p>
-          <h4>Sold by</h4>
-          <p>
-            <b>Basemark Official Store</b>
-          </p>
-          <button
-            className="btn outline"
-            onClick={() => needLogin("/shop/" + p.category)}
-          >
-            Visit Store
-          </button>
+          {p.brand && (
+            <>
+              <h4>More from {p.brand}</h4>
+              <Link to="/shop">Browse all products</Link>
+            </>
+          )}
         </aside>
       </section>
 
@@ -132,7 +144,7 @@ export default function Product() {
           <tbody>
             <tr>
               <td>Brand</td>
-              <td>Basemark</td>
+              <td>{p.brand || "Not provided"}</td>
             </tr>
             <tr>
               <td>Category</td>

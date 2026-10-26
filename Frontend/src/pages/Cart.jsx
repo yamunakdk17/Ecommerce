@@ -1,10 +1,10 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useStore } from "../context/StoreContext.jsx";
-import { useAuth } from "../context/AuthContext.jsx";
+import { useStore } from "../context/storeContext.js";
+import { useAuth } from "../context/authContext.js";
 import { money } from "../utils.js";
 
 export default function Cart() {
-  const { lines, total, count, setQty } = useStore();
+  const { lines, total, count, setQty, remove } = useStore();
   const { user, setNext } = useAuth();
   const go = useNavigate();
   const checkout = () => {
@@ -24,23 +24,42 @@ export default function Cart() {
       </div>
     );
   }
+
   return (
     <div className="wrap cart">
       <section className="section grow">
         <h2>Shopping cart ({count})</h2>
-        {lines.map((l) => (
-          <div className="line" key={l.id}>
-            <img src={l.image} alt={l.name} />
+        {lines.map((line) => (
+          <div className="line" key={line.id}>
+            <img src={line.image} alt={line.name} />
             <div className="grow">
-              <Link to={"/product/" + l.id}>{l.name}</Link>
-              <div className="price">{money(l.price)}</div>
+              <Link to={`/product/${line.id}`}>{line.name}</Link>
+              <div className="price">{money(line.price)}</div>
             </div>
             <div className="qty">
-              <button onClick={() => setQty(l.id, l.qty - 1)}>−</button>
-              <span>{l.qty}</span>
-              <button onClick={() => setQty(l.id, l.qty + 1)}>+</button>
+              <button
+                aria-label={`Decrease ${line.name} quantity`}
+                disabled={line.qty <= 1}
+                onClick={() => setQty(line.id, line.qty - 1)}
+              >
+                −
+              </button>
+              <span>{line.qty}</span>
+              <button
+                aria-label={`Increase ${line.name} quantity`}
+                onClick={() => setQty(line.id, line.qty + 1)}
+              >
+                +
+              </button>
             </div>
-            <b>{money(l.price * l.qty)}</b>
+            <b>{money(line.price * line.qty)}</b>
+            <button
+              className="cart-remove"
+              type="button"
+              onClick={() => remove(line.id)}
+            >
+              Remove
+            </button>
           </div>
         ))}
       </section>

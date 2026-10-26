@@ -1,24 +1,29 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { getMe, loginUser, registerUser, updateMe } from "../api.js";
 import { ls } from "../utils.js";
-
-const AuthCtx = createContext();
-export const useAuth = () => useContext(AuthCtx);
+import { AuthCtx } from "./authContext.js";
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(() => !ls.get("bm_token"));
   const [next, setNext] = useState("/dashboard"); // where to go after login
 
   useEffect(() => {
-    if (!ls.get("bm_token")) {
-      setReady(true);
-      return;
-    }
+    if (!ls.get("bm_token")) return;
+    let active = true;
     getMe()
-      .then(setUser)
-      .catch(() => ls.del("bm_token"))
-      .finally(() => setReady(true));
+      .then((currentUser) => {
+        if (active) setUser(currentUser);
+      })
+      .catch(() => {
+        if (active) ls.del("bm_token");
+      })
+      .finally(() => {
+        if (active) setReady(true);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const save = ({ token, user }) => {

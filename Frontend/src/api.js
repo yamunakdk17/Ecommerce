@@ -32,7 +32,10 @@ function mock(path, options) {
   const save = () => ls.set("bm_demo", JSON.stringify(d));
   const uid = Number((ls.get("bm_token") || "").split(":")[1]);
   const me = d.users.find((u) => u.id === uid);
-  const pub = ({ password, ...u }) => u;
+  const pub = (user) =>
+    Object.fromEntries(
+      Object.entries(user).filter(([key]) => key !== "password"),
+    );
 
   if (path === "/auth/register") {
     if (d.users.some((u) => u.email === body.email))

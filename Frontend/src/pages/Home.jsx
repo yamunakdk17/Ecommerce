@@ -3,14 +3,15 @@ import { Link } from "react-router-dom";
 import Hero from "../components/Hero.jsx";
 import ProductCard from "../components/ProductCard.jsx";
 import Icon from "../components/Icon.jsx";
-import { useStore } from "../context/StoreContext.jsx";
-import { categories } from "../data/products.js";
+import { useStore } from "../context/storeContext.js";
+import { categories } from "../data/Products.js";
+import collectionImage from "../assets/portrait-young-woman-2000s-fashion-style.jpg";
 
 const perks = [
-  ["truck", "Fast local delivery", "Kathmandu in 24 hours"],
-  ["rotate", "Easy returns", "7-day return policy"],
-  ["shield", "Secure checkout", "Cash on delivery available"],
-  ["headset", "Friendly support", "Here when you need us"],
+  ["truck", "Delivery options", "Confirmed at checkout"],
+  ["rotate", "Returns & warranty", "See available product details"],
+  ["shield", "New styles", "Explore the latest looks"],
+  ["headset", "Product catalog", "Browse all available items"],
 ];
 
 export default function Home() {
@@ -18,6 +19,10 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [done, setDone] = useState(false);
   const deals = products.filter((p) => p.oldPrice).slice(0, 5);
+  const bestSellers = [...products]
+    .filter((p) => p.rating != null)
+    .sort((a, b) => b.rating - a.rating)
+    .slice(0, 5);
 
   return (
     <>
@@ -50,17 +55,29 @@ export default function Home() {
         <section className="section">
           <div className="sec-head">
             <h2>Today’s deals</h2>
-            <Link to="/shop">See all deals</Link>
+            <Link to="/shop?deals=1">See all deals</Link>
           </div>
           <div className="row">
             {deals.map((p) => (
-              <ProductCard key={p.id} p={p} />
+              <ProductCard key={p.id} p={p} showAddToCart={false} />
+            ))}
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="sec-head">
+            <h2>Top rated</h2>
+            <Link to="/shop">Browse all products</Link>
+          </div>
+          <div className="row">
+            {bestSellers.map((p) => (
+              <ProductCard key={p.id} p={p} showAddToCart={false} />
             ))}
           </div>
         </section>
 
         <section className="promo">
-          <img src="/images/banner.jpg" alt="New season collection" />
+          <img src={collectionImage} alt="New season collection" />
           <div>
             <p className="tag">New season</p>
             <h2>Style that moves with you</h2>
@@ -75,7 +92,7 @@ export default function Home() {
           <h2>Just for you</h2>
           <div className="prod-grid">
             {products.map((p) => (
-              <ProductCard key={p.id} p={p} />
+              <ProductCard key={p.id} p={p} showAddToCart={false} />
             ))}
           </div>
         </section>

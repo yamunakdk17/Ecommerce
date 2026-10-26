@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useStore } from "../context/StoreContext.jsx";
-import { useAuth } from "../context/AuthContext.jsx";
+import { useStore } from "../context/storeContext.js";
+import { useAuth } from "../context/authContext.js";
 import { placeOrder } from "../api.js";
 import { money } from "../utils.js";
 

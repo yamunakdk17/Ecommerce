@@ -1,0 +1,8 @@
+{
+  "name": "ecommerce",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix Backend run dev"
+  }
+}

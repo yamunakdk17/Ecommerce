@@ -1,18 +1,14 @@
 require('dotenv').config();
 
-const cors = require('cors');
-const express = require('express');
+const app = require('./app');
 
-const app = express();
-const port = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
 
-app.use(cors());
-app.use(express.json());
-
-app.get('/', (_req, res) => {
-  res.json({ message: 'Backend is running' });
+const server = app.listen(PORT, () => {
+  console.log(`Backend running at http://localhost:${PORT}`);
 });
 
-app.listen(port, () => {
-  console.log(`Backend server listening on port ${port}`);
+server.on('error', (error) => {
+  console.error(`Failed to start backend on port ${PORT}:`, error.message);
+  process.exitCode = 1;
 });

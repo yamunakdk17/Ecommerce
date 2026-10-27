@@ -3,7 +3,7 @@ const cors = require('cors');
 const db = require('./config/db');
 
 const productRoutes = require('./routes/productRoutes');
-
+const paymentRoutes = require('./routes/paymentRoutes');
 const app = express();
 
 app.use(
@@ -17,6 +17,7 @@ app.use(express.json());
 
 // Existing product API
 app.use('/api/products', productRoutes);
+app.use('/api/payments', paymentRoutes);
 
 app.get('/', (_req, res) => {
   res.json({

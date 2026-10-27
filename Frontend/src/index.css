@@ -907,6 +907,28 @@ header {
   border-radius: 6px;
 }
 
+.checkout-item-select {
+  display: flex;
+  align-items: center;
+}
+
+.checkout-item-select input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--red);
+  cursor: pointer;
+}
+
+.checkout-selection-help {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.checkout-buy-one {
+  flex-shrink: 0;
+  padding: 8px 12px;
+}
+
 .qty {
   display: inline-flex;
   align-items: center;

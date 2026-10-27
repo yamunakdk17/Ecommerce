@@ -1,22 +1,23 @@
-import { useEffect } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { useEffect } from 'react';
+import { Routes, Route, useLocation } from 'react-router-dom';
 
-import { StoreProvider } from "./context/StoreContext.jsx";
-import { AuthProvider } from "./context/AuthContext.jsx";
+import { StoreProvider } from './context/StoreContext.jsx';
+import { AuthProvider } from './context/AuthContext.jsx';
 
-import RequireAuth from "./components/RequireAuth.jsx";
-import Navbar from "./components/Navbar.jsx";
-import Footer from "./components/Footer.jsx";
-import Toast from "./components/Toast.jsx";
+import RequireAuth from './components/RequireAuth.jsx';
+import Navbar from './components/Navbar.jsx';
+import Footer from './components/Footer.jsx';
+import Toast from './components/Toast.jsx';
 
-import Home from "./pages/Home.jsx";
-import Shop from "./pages/Shop.jsx";
-import Product from "./pages/Product.jsx";
-import Cart from "./pages/Cart.jsx";
-import Login from "./pages/Login.jsx";
-import Register from "./pages/Register.jsx";
-import Checkout from "./pages/Checkout.jsx";
-import Dashboard from "./pages/Dashboard.jsx";
+import Home from './pages/Home.jsx';
+import Shop from './pages/Shop.jsx';
+import Product from './pages/Product.jsx';
+import Cart from './pages/Cart.jsx';
+import Login from './pages/Login.jsx';
+import Register from './pages/Register.jsx';
+import Checkout from './pages/Checkout.jsx';
+import Dashboard from './pages/Dashboard.jsx';
+import PaymentSuccess from './pages/PaymentSuccess.jsx';
 
 export default function App() {
   const { pathname } = useLocation();
@@ -69,6 +70,7 @@ export default function App() {
               </RequireAuth>
             }
           />
+          <Route path="/payment-success" element={<PaymentSuccess />} />
         </Routes>
 
         <Footer />

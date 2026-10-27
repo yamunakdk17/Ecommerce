@@ -82,6 +82,13 @@ export function StoreProvider({ children }) {
     );
   };
 
+  const removeItems = (productIds) => {
+    const ids = new Set(productIds.map(String));
+    setLines((current) =>
+      current.filter((item) => !ids.has(String(item.id))),
+    );
+  };
+
   const clear = () => setLines([]);
   const count = lines.reduce((sum, item) => sum + item.qty, 0);
   const total = lines.reduce(
@@ -100,6 +107,7 @@ export function StoreProvider({ children }) {
     add,
     setQty,
     remove,
+    removeItems,
     clear,
     // Keep the earlier context names available to existing components.
     cart: lines,
@@ -113,4 +121,3 @@ export function StoreProvider({ children }) {
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
-

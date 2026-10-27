@@ -10,6 +10,10 @@ router.post(
   requireAuth,
   paymentController.initiateEsewaPayment,
 );
+router.post('/khalti/initiate', paymentController.initiateKhaltiPayment);
+
+
 router.post('/esewa/verify', paymentController.verifyEsewaPayment);
+router.post('/khalti/verify', paymentController.verifyKhaltiPayment);
 
 module.exports = router;

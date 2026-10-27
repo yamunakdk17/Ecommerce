@@ -1,13 +1,30 @@
 const esewaService = require('./esewaService');
 
+const khaltiService = require('./khaltiService');
+
 const initiateEsewaPayment = async ({ amount }) => {
-  const payment = esewaService.createEsewaPayment({
+  return esewaService.createEsewaPayment({
     amount,
   });
+};
 
-  return payment;
+const initiateKhaltiPayment = async ({ orderId, amount, customer, items }) => {
+  return khaltiService.initiateKhaltiPayment({
+    orderId,
+    amount,
+    customer,
+    items,
+  });
+};
+
+const lookupKhaltiPayment = async ({ pidx }) => {
+  return khaltiService.lookupKhaltiPayment({
+    pidx,
+  });
 };
 
 module.exports = {
   initiateEsewaPayment,
+  initiateKhaltiPayment,
+  lookupKhaltiPayment,
 };

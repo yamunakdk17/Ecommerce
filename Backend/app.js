@@ -77,10 +77,8 @@ app.use((error, req, res, next) => {
   }
 
   console.error('API error:', error);
-
-  const requestedPaymentVerification =
-    req.originalUrl.split('?')[0] === '/api/payments/esewa/verify';
   const requestedStatus = Number(error.statusCode || error.status);
+
   const statusCode =
     Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus < 600
       ? requestedStatus
@@ -88,11 +86,7 @@ app.use((error, req, res, next) => {
 
   return res.status(statusCode).json({
     success: false,
-    message: requestedPaymentVerification
-      ? 'Payment verification failed'
-      : statusCode < 500
-        ? error.message
-        : 'Request failed',
+    message: error.message || 'Request failed',
   });
 });
 

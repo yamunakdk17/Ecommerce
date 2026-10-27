@@ -154,11 +154,6 @@ const initiateKhaltiPayment = async (req, res, next) => {
       });
     }
 
-    /*
-     * STEP 1
-     *
-     * Create Khalti payment.
-     */
     const payment = await paymentService.initiateKhaltiPayment({
       orderId,
       amount,
@@ -166,21 +161,8 @@ const initiateKhaltiPayment = async (req, res, next) => {
       items,
     });
 
-    /*
-     * STEP 2
-     *
-     * Save Khalti pidx against the order.
-     *
-     * This allows the backend to connect the
-     * Khalti payment with the correct order.
-     */
     await orderService.setKhaltiTransaction(orderId, req.user.id, payment.pidx, amount);
 
-    /*
-     * STEP 3
-     *
-     * Send payment URL back to frontend.
-     */
     return res.status(200).json({
       success: true,
       message: 'Khalti payment initialized successfully',
@@ -225,7 +207,6 @@ const verifyKhaltiPayment = async (req, res, next) => {
       pidx,
     });
 
-    console.log('Khalti payment lookup:', result);
 
     /*
      * PAYMENT SUCCESS

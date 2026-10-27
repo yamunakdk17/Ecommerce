@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useStore } from '../context/StoreContext.js';
 import { useAuth } from '../context/authContext.js';
 import { createEsewaPayment, placeOrder, validatePromotion } from '../api.js';
-import { money } from '../utils.js';
+import { ls, money } from '../utils.js';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(
   /\/+$/,
@@ -111,71 +111,71 @@ export default function Checkout() {
     form.submit();
   }
 
-  async function startKhaltiPayment(order) {
-    const response = await fetch(`${API_URL}/payments/khalti/initiate`, {
-      method: 'POST',
+ async function startKhaltiPayment(order) {
+   if (!order?.orderId) {
+     throw new Error('Order ID was not returned after creating the order.');
+   }
 
-      headers: {
-        'Content-Type': 'application/json',
-      },
+const token = ls.get('bm_token');
 
-      body: JSON.stringify({
-        orderId: order.orderId,
 
-        amount: Number(order.total),
+   if (!token || token.startsWith('demo:')) {
+     throw new Error('Please log in before making a Khalti payment.');
+   }
 
-        customer: {
-          name: f.name,
-          email: user?.email || '',
-          phone: f.phone,
-        },
+   const response = await fetch(`${API_URL}/payments/khalti/initiate`, {
+     method: 'POST',
+     headers: {
+       'Content-Type': 'application/json',
+       Authorization: `Bearer ${token}`,
+     },
+     body: JSON.stringify({
+       orderId: order.orderId,
+       amount: Number(order.total),
+       customer: {
+         name: f.name,
+         email: user?.email || '',
+         phone: f.phone,
+       },
+       items: selectedLines.map((item) => ({
+         productId: item.id,
+         name: item.name,
+         price: Number(item.price),
+         qty: Number(item.qty),
+       })),
+     }),
+   });
 
-        items: selectedLines.map((item) => ({
-          productId: item.id,
-          name: item.name,
-          price: Number(item.price),
-          qty: Number(item.qty),
-        })),
-      }),
-    });
+   const responseText = await response.text();
 
-    const responseText = await response.text();
+   let result;
 
-    let result;
+   try {
+     result = JSON.parse(responseText);
+   } catch {
+     throw new Error('Backend returned an invalid Khalti response');
+   }
 
-    try {
-      result = JSON.parse(responseText);
-    } catch {
-      throw new Error('Backend returned an invalid Khalti response');
-    }
+   if (!response.ok || !result.success) {
+     throw new Error(result.message || 'Unable to initialize Khalti payment');
+   }
 
-    if (!response.ok || !result.success) {
-      throw new Error(result.message || 'Unable to initialize Khalti payment');
-    }
+   if (!result.data?.paymentUrl) {
+     throw new Error('Khalti payment URL was not returned');
+   }
 
-    if (!result.data?.paymentUrl) {
-      throw new Error('Khalti payment URL was not returned');
-    }
+   sessionStorage.setItem(
+     'bm_pending_payment_items',
+     JSON.stringify(
+       selectedLines.map(({ id, qty }) => ({
+         id,
+         qty,
+       })),
+     ),
+   );
 
-    /*
-     * PaymentSuccess.jsx uses this to remove the
-     * purchased items after successful payment.
-     */
-    sessionStorage.setItem(
-      'bm_pending_payment_items',
-      JSON.stringify(
-        selectedLines.map(({ id, qty }) => ({
-          id,
-          qty,
-        })),
-      ),
-    );
-
-    /*
-     * Redirect user to Khalti.
-     */
-    window.location.href = result.data.paymentUrl;
-  }
+   window.location.href = result.data.paymentUrl;
+ }
 
   async function submit(event) {
     event.preventDefault();

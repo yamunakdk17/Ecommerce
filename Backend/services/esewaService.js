@@ -106,15 +106,14 @@ const decodeEsewaResponse = (encodedData) => {
 const generateResponseSignature = (data) => {
   const signedFieldNames = data.signed_field_names;
 
-  console.log(signedFieldNames);
   const allowedFields = new Set([
     'transaction_code',
     'status',
     'total_amount',
     'transaction_uuid',
     'product_code',
+    'signed_field_names',
   ]);
-  const requiredFields = ['status', 'total_amount', 'transaction_uuid', 'product_code'];
 
   if (typeof signedFieldNames !== 'string' || !signedFieldNames) {
     const error = new Error('eSewa signed_field_names is missing');
@@ -122,12 +121,14 @@ const generateResponseSignature = (data) => {
     throw error;
   }
 
-  const fields = signedFieldNames.split(',').map((field) => field.trim());
+  const fields = signedFieldNames
+    .split(',')
+    .map((field) => field.trim())
+    .filter(Boolean);
 
   if (
     fields.some((field) => !allowedFields.has(field)) ||
     new Set(fields).size !== fields.length ||
-    requiredFields.some((field) => !fields.includes(field)) ||
     fields.some(
       (field) =>
         data[field] === undefined ||
@@ -144,18 +145,13 @@ const generateResponseSignature = (data) => {
     throw new Error('ESEWA_SECRET_KEY is not configured');
   }
 
-  const message = fields
-    .map((field) => {
-      return `${field}=${data[field]}`;
-    })
-    .join(',');
+  const message = fields.map((field) => `${field}=${data[field]}`).join(',');
 
   return crypto
     .createHmac('sha256', process.env.ESEWA_SECRET_KEY)
     .update(message)
     .digest('base64');
 };
-
 /**
  * Verify eSewa response signature
  */

@@ -495,33 +495,65 @@ const failEsewaOrder = async (transactionUuid) => {
   }
 };
 
-const completeEsewaOrder = async ({
-  transactionUuid,
-  transactionCode,
-  totalAmount,
-}) => {
+const completeEsewaOrder = async ({ transactionUuid, transactionCode, totalAmount }) => {
   await ensureTables();
+
   const connection = await db.getConnection();
+
   try {
     await connection.beginTransaction();
-    const [result] = await connection.query(
-    `UPDATE orders
-     SET payment_status = 'paid', order_status = 'pending', transaction_code = ?
-     WHERE transaction_uuid = ? AND total = ? AND payment_method = 'ESEWA'
-       AND payment_status = 'pending' AND order_status = 'awaiting_payment'`,
-      [transactionCode || null, transactionUuid, Number(totalAmount).toFixed(2)],
+
+    const [orders] = await connection.query(
+      `SELECT id
+       FROM orders
+       WHERE transaction_uuid = ?
+         AND payment_method = 'ESEWA'
+       FOR UPDATE`,
+      [transactionUuid],
     );
-    if (!result.affectedRows) {
-      const error = new Error('No matching pending eSewa order was found');
+
+    if (!orders[0]) {
+      const error = new Error('No matching eSewa order was found');
       error.statusCode = 409;
       throw error;
     }
-    await connection.query(
-      `UPDATE payments SET status = 'COMPLETE', transaction_code = ?
-       WHERE transaction_uuid = ? AND amount = ?`,
-      [transactionCode || null, transactionUuid, Number(totalAmount).toFixed(2)],
+
+    const orderId = orders[0].id;
+
+    const [result] = await connection.query(
+      `UPDATE orders
+       SET
+         payment_status = 'paid',
+         order_status = 'pending',
+         transaction_code = ?
+       WHERE id = ?`,
+      [transactionCode || null, orderId],
     );
+
+    if (!result.affectedRows) {
+      const error = new Error('Unable to complete eSewa order');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    await connection.query(
+      `UPDATE payments
+       SET
+         status = 'COMPLETE',
+         transaction_code = ?
+       WHERE order_id = ?
+         AND transaction_uuid = ?`,
+      [transactionCode || null, orderId, transactionUuid],
+    );
+
     await connection.commit();
+
+    return {
+      orderId,
+      transactionUuid,
+      transactionCode: transactionCode || null,
+      totalAmount,
+    };
   } catch (error) {
     await connection.rollback();
     throw error;

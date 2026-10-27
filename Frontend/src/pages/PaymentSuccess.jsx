@@ -187,70 +187,61 @@ export default function PaymentSuccess() {
          *
          * ESEWA PAYMENT
          */
-        if (responseData) {
-          const response = await fetch(`${API_URL}/payments/esewa/verify`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              data: responseData,
-            }),
-          });
+    if (responseData) {
+      const response = await fetch(`${API_URL}/payments/esewa/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          data: responseData,
+        }),
+      });
 
-          console.log(response);
+      const responseText = await response.text();
 
-          const responseText = await response.text();
-          console.log('===== ESEWA DEBUG =====');
-          console.log('HTTP STATUS:', response.status);
-          console.log('RAW RESPONSE:', responseText);
+      let result;
 
-          let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        throw new Error('Backend returned a non-JSON payment response.');
+      }
 
-          try {
-            result = JSON.parse(responseText);
-          } catch (error) {  console.error('JSON PARSE ERROR:', error);
-            throw new Error('Backend returned a non-JSON payment response.');
-          }
-          console.log('SUCCESS:', result.success);
-          console.log('PAYMENT STATUS:', result.paymentStatus);
-          console.log('DATA:', result.data);
-          console.log('======================');
-          if (!response.ok) {
-            throw new Error(result.message || `Backend error (${response.status})`);
-          }
-            if (!result.success) {
-  throw new Error(
-    result.message || "Backend reported payment verification failure."
-  );
-}
-if (result.paymentStatus !== "COMPLETE") {
-  throw new Error(
-    `eSewa payment status is ${result.paymentStatus || "UNKNOWN"}`
-  );
-}
-if (!result.data) {
-  throw new Error("Payment verified but backend returned no payment data.");
-}
+      if (!response.ok) {
+        throw new Error(result.message || `Backend error (${response.status})`);
+      }
 
-if (!cancelled) {
-  setState({
-    status: "success",
-    payment: {
-      ...result.data,
-      paymentMethod: "ESEWA",
-    },
-  });
-}
+      if (!result.success) {
+        throw new Error(
+          result.message || 'Backend reported payment verification failure.',
+        );
+      }
 
-return;
+      if (result.paymentStatus !== 'COMPLETE') {
+        throw new Error(`eSewa payment status is ${result.paymentStatus || 'UNKNOWN'}`);
+      }
 
-        }
+      if (!result.data) {
+        throw new Error('Payment verified but backend returned no payment data.');
+      }
 
+      if (!cancelled) {
+        setState({
+          status: 'success',
+          payment: {
+            ...result.data,
+            paymentMethod: 'ESEWA',
+          },
+        });
+      }
+
+      return;
+    }
         /*
          *
          * NO PAYMENT RESPONSE
-         * 
+         *
          */
         throw new Error('No payment response was received.');
       } catch (error) {

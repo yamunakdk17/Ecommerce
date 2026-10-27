@@ -3,7 +3,7 @@ import { ls } from "./utils.js";
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 let demo = false;
 export const isDemo = () => demo;
- 
+
 async function request(path, options = {}) {
   const token = ls.get("bm_token");
   const headers = { "Content-Type": "application/json" };

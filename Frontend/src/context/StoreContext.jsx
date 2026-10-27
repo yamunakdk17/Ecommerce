@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { getProducts } from "../api.js";
-import { localProducts } from "../data/Products.js";
+import { useCallback, useEffect, useState } from "react";
+import { getProducts, getStorefrontData } from "../api.js";
+import { categories as localCategories, localProducts } from "../data/Products.js";
 import { ls } from "../utils.js";
 import { StoreContext } from "./storeContext.js";
 const CART_KEY = "bm_cart";
@@ -16,28 +16,77 @@ function readCart() {
 
 export function StoreProvider({ children }) {
   const [products, setProducts] = useState(localProducts);
+  const [storefront, setStorefront] = useState({
+    storeName: "Basemark",
+    announcement: "",
+    promotions: [],
+  });
   const [lines, setLines] = useState(readCart);
   const [query, setQuery] = useState("");
   const [toast, setToast] = useState("");
 
+  const refreshProducts = useCallback(async () => {
+    const result = await getProducts();
+    const rows = Array.isArray(result)
+      ? result
+      : result?.data || result?.products;
+    if (Array.isArray(rows)) {
+      setProducts(
+        rows.map((product) => ({
+          ...product,
+          id: product.id,
+          price: Number(product.price),
+          oldPrice: Number(product.oldPrice ?? product.old_price) || null,
+          category: product.category || "",
+          stock: Number(product.stock) || 0,
+        })),
+      );
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
-    getProducts()
-      .then((result) => {
-        const rows = Array.isArray(result) ? result : result?.products;
-        if (active && Array.isArray(rows)) setProducts(rows);
-      })
+    Promise.resolve()
+      .then(refreshProducts)
       .catch(() => {
         // Keep the bundled catalog when the products endpoint is unavailable.
+      });
+    getStorefrontData()
+      .then((result) => {
+        if (active && result?.data) setStorefront(result.data);
+      })
+      .catch(() => {
+        // Keep default store details when the API is unavailable.
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [refreshProducts]);
+
+  const categories = [
+    ...localCategories.filter((category) =>
+      products.some((product) => product.category === category.slug),
+    ),
+    ...[...new Set(products.map((product) => product.category).filter(Boolean))]
+      .filter(
+        (slug) => !localCategories.some((category) => category.slug === slug),
+      )
+      .map((slug) => ({
+        slug,
+        name: slug
+          .split(/[-_\s]+/)
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
+      })),
+  ];
 
   useEffect(() => {
     ls.set(CART_KEY, JSON.stringify(lines));
   }, [lines]);
+
+  useEffect(() => {
+    document.title = storefront.storeName || "Basemark";
+  }, [storefront.storeName]);
 
   const showToast = (message) => {
     setToast(message);
@@ -89,6 +138,21 @@ export function StoreProvider({ children }) {
     );
   };
 
+  const removePurchasedItems = useCallback((purchasedItems) => {
+    const purchasedQuantities = new Map(
+      purchasedItems.map(({ id, qty }) => [String(id), Number(qty)]),
+    );
+
+    setLines((current) =>
+      current.flatMap((item) => {
+        const remainingQty =
+          item.qty - (purchasedQuantities.get(String(item.id)) || 0);
+
+        return remainingQty > 0 ? [{ ...item, qty: remainingQty }] : [];
+      }),
+    );
+  }, []);
+
   const clear = () => setLines([]);
   const count = lines.reduce((sum, item) => sum + item.qty, 0);
   const total = lines.reduce(
@@ -98,6 +162,9 @@ export function StoreProvider({ children }) {
 
   const value = {
     products,
+    categories,
+    storefront,
+    refreshProducts,
     lines,
     total,
     count,
@@ -108,6 +175,7 @@ export function StoreProvider({ children }) {
     setQty,
     remove,
     removeItems,
+    removePurchasedItems,
     clear,
     // Keep the earlier context names available to existing components.
     cart: lines,

@@ -15,10 +15,14 @@ async function request(path, options = {}) {
   } catch {
     return mock(path, options); // backend unreachable
   }
-  if (!(res.headers.get("content-type") || "").includes("json"))
-    return mock(path, options);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Request failed");
+  const responseText = await res.text();
+  let data;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    throw new Error("The server returned an invalid response");
+  }
+  if (!res.ok) throw new Error(data.message || data.error || "Request failed");
   demo = false;
   return data;
 }
@@ -89,6 +93,12 @@ function mock(path, options) {
 }
 
 export const getProducts = () => request("/products");
+export const getStorefrontData = () => request("/storefront");
+export const validatePromotion = (code, subtotal) =>
+  request("/storefront/promotions/validate", {
+    method: "POST",
+    body: JSON.stringify({ code, subtotal }),
+  });
 export const registerUser = (f) =>
   request("/auth/register", { method: "POST", body: JSON.stringify(f) });
 export const loginUser = (f) =>
@@ -99,3 +109,46 @@ export const updateMe = (f) =>
 export const getOrders = () => request("/orders");
 export const placeOrder = (o) =>
   request("/orders", { method: "POST", body: JSON.stringify(o) });
+export const createEsewaPayment = ({ amount, orderId }) =>
+  request("/payments/esewa/initiate", {
+    method: "POST",
+    body: JSON.stringify({ amount, orderId }),
+  });
+export const getAdminData = (path) => request(`/admin/${path}`);
+export const createAdminProduct = (product) =>
+  request("/admin/products", {
+    method: "POST",
+    body: JSON.stringify(product),
+  });
+export const updateAdminProduct = (id, product) =>
+  request(`/admin/products/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(product),
+  });
+export const deleteAdminProduct = (id) =>
+  request(`/admin/products/${id}`, { method: "DELETE" });
+export const updateAdminOrder = (id, status) =>
+  request(`/admin/orders/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+export const updateAdminCustomer = (id, isActive) =>
+  request(`/admin/customers/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ isActive }),
+  });
+export const updateStoreSettings = (settings) =>
+  request("/admin/settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+export const savePromotion = (promotion) =>
+  request(
+    promotion.id ? `/admin/promotions/${promotion.id}` : "/admin/promotions",
+    {
+      method: promotion.id ? "PUT" : "POST",
+      body: JSON.stringify(promotion),
+    },
+  );
+export const deletePromotion = (id) =>
+  request(`/admin/promotions/${id}`, { method: "DELETE" });

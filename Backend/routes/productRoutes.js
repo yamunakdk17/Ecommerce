@@ -3,6 +3,8 @@ const express = require('express');
 const router = express.Router();
 
 const productController = require('../controllers/productController');
+const requireAuth = require('../middleware/requireAuth');
+const requireAdmin = require('../middleware/requireAdmin');
 
 // Get all products
 router.get('/', productController.getProducts);
@@ -11,12 +13,12 @@ router.get('/', productController.getProducts);
 router.get('/:id', productController.getProduct);
 
 // Create product
-router.post('/', productController.createProduct);
+router.post('/', requireAuth, requireAdmin, productController.createProduct);
 
 // Update product
-router.put('/:id', productController.updateProduct);
+router.put('/:id', requireAuth, requireAdmin, productController.updateProduct);
 
 // Delete product
-router.delete('/:id', productController.deleteProduct);
+router.delete('/:id', requireAuth, requireAdmin, productController.deleteProduct);
 
 module.exports = router;

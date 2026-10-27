@@ -25,7 +25,7 @@ export default function Register() {
     if (f.password !== f.confirm) return setErr("Passwords do not match");
     setBusy(true);
     try {
-      await register({
+      const account = await register({
         name: f.name,
         email: f.email,
         phone: f.phone,
@@ -33,7 +33,7 @@ export default function Register() {
       });
       const to = next || "/dashboard";
       setNext("/dashboard");
-      go(to);
+      go(account.role === "admin" ? "/admin" : to);
     } catch (x) {
       setErr(x.message);
     }

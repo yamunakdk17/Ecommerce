@@ -5,6 +5,7 @@ import { StoreProvider } from './context/StoreContext.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
 
 import RequireAuth from './components/RequireAuth.jsx';
+import RequireAdmin from './components/RequireAdmin.jsx';
 import Navbar from './components/Navbar.jsx';
 import Footer from './components/Footer.jsx';
 import Toast from './components/Toast.jsx';
@@ -18,6 +19,7 @@ import Register from './pages/Register.jsx';
 import Checkout from './pages/Checkout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import PaymentSuccess from './pages/PaymentSuccess.jsx';
+import Admin from './pages/Admin.jsx';
 
 export default function App() {
   const { pathname } = useLocation();
@@ -68,6 +70,22 @@ export default function App() {
               <RequireAuth>
                 <Dashboard />
               </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <RequireAdmin>
+                <Admin />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/:tab"
+            element={
+              <RequireAdmin>
+                <Admin />
+              </RequireAdmin>
             }
           />
           <Route path="/payment-success" element={<PaymentSuccess />} />

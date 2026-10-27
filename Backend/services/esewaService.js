@@ -1,4 +1,4 @@
-const crypto = require("crypto");
+const crypto = require('crypto');
 const {
   generateEsewaSignature,
   generateTransactionUuid,
@@ -57,29 +57,39 @@ const createEsewaPayment = ({
  */
 const decodeEsewaResponse = (encodedData) => {
   try {
-    if (!encodedData) {
-      throw new Error("eSewa response data is missing");
+    if (typeof encodedData !== 'string' || !encodedData) {
+      throw new Error('eSewa response data is missing');
     }
 
-    const decodedString = Buffer.from(
-      encodedData,
-      "base64"
-    ).toString("utf8");
+    const base64Data = encodedData.replace(/ /g, '+');
+    const decodedString = Buffer.from(base64Data, 'base64').toString('utf8');
+    const normalizedData = base64Data.replace(/=+$/, '');
+    const normalizedDecoded = Buffer.from(decodedString, 'utf8')
+      .toString('base64')
+      .replace(/=+$/, '');
+
+    if (
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(base64Data) ||
+      normalizedData !== normalizedDecoded
+    ) {
+      throw new Error('Invalid Base64 response');
+    }
 
     const data = JSON.parse(decodedString);
 
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('Invalid eSewa response object');
+    }
+
     return data;
-  } catch (error) {
-    const err = new Error(
-      "Invalid eSewa payment response"
-    );
+  } catch {
+    const err = new Error('Invalid eSewa payment response');
 
     err.statusCode = 400;
 
     throw err;
   }
 };
-
 
 /**
  * Generate signature for eSewa response verification
@@ -95,62 +105,101 @@ const decodeEsewaResponse = (encodedData) => {
  */
 const generateResponseSignature = (data) => {
   const signedFieldNames = data.signed_field_names;
+  const allowedFields = new Set([
+    'transaction_code',
+    'status',
+    'total_amount',
+    'transaction_uuid',
+    'product_code',
+  ]);
+  const requiredFields = [
+    'status',
+    'total_amount',
+    'transaction_uuid',
+    'product_code',
+  ];
 
-  if (!signedFieldNames) {
-    throw new Error(
-      "eSewa signed_field_names is missing"
-    );
+  if (typeof signedFieldNames !== 'string' || !signedFieldNames) {
+    const error = new Error('eSewa signed_field_names is missing');
+    error.statusCode = 400;
+    throw error;
   }
 
-  const fields = signedFieldNames.split(",");
+  const fields = signedFieldNames.split(',').map((field) => field.trim());
+
+  if (
+    fields.some((field) => !allowedFields.has(field)) ||
+    new Set(fields).size !== fields.length ||
+    requiredFields.some((field) => !fields.includes(field)) ||
+    fields.some(
+      (field) =>
+        data[field] === undefined ||
+        data[field] === null ||
+        typeof data[field] === 'object',
+    )
+  ) {
+    const error = new Error('Invalid eSewa signed fields');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!process.env.ESEWA_SECRET_KEY) {
+    throw new Error('ESEWA_SECRET_KEY is not configured');
+  }
 
   const message = fields
     .map((field) => {
       return `${field}=${data[field]}`;
     })
-    .join(",");
+    .join(',');
 
   return crypto
-    .createHmac(
-      "sha256",
-      process.env.ESEWA_SECRET_KEY
-    )
+    .createHmac('sha256', process.env.ESEWA_SECRET_KEY)
     .update(message)
-    .digest("base64");
+    .digest('base64');
 };
-
 
 /**
  * Verify eSewa response signature
  */
 const verifyEsewaResponseSignature = (data) => {
-  if (!data.signature) {
+  if (typeof data.signature !== 'string' || !data.signature) {
     return false;
   }
 
-  const generatedSignature =
-    generateResponseSignature(data);
+  const generatedSignature = generateResponseSignature(data);
+  const expected = Buffer.from(generatedSignature, 'base64');
+  const actual = Buffer.from(data.signature, 'base64');
 
-  return crypto.timingSafeEqual(
-    Buffer.from(generatedSignature),
-    Buffer.from(data.signature)
-  );
+  if (
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(data.signature) ||
+    actual.toString('base64') !== data.signature ||
+    actual.length !== expected.length
+  ) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expected, actual);
 };
-
 
 /**
  * Verify the payment response received from eSewa
  */
-const verifyEsewaPayment = (encodedData) => {
+const verifyEsewaPaymentResponse = (encodedData) => {
   const data = decodeEsewaResponse(encodedData);
 
-  const isValidSignature =
-    verifyEsewaResponseSignature(data);
+  const isValidSignature = verifyEsewaResponseSignature(data);
 
   if (!isValidSignature) {
-    const error = new Error(
-      "Invalid eSewa payment signature"
-    );
+    const error = new Error('Invalid eSewa payment signature');
+
+    error.statusCode = 400;
+
+    throw error;
+  }
+
+  if (data.product_code !== process.env.ESEWA_PRODUCT_CODE) {
+    const error = new Error('Invalid eSewa product code');
 
     error.statusCode = 400;
 
@@ -158,15 +207,13 @@ const verifyEsewaPayment = (encodedData) => {
   }
 
   if (
-    data.product_code !==
-    process.env.ESEWA_PRODUCT_CODE
+    typeof data.transaction_uuid !== 'string' ||
+    !data.transaction_uuid ||
+    !Number.isFinite(Number(data.total_amount)) ||
+    Number(data.total_amount) <= 0
   ) {
-    const error = new Error(
-      "Invalid eSewa product code"
-    );
-
+    const error = new Error('Invalid eSewa transaction details');
     error.statusCode = 400;
-
     throw error;
   }
 
@@ -187,78 +234,87 @@ const verifyEsewaPayment = (encodedData) => {
   };
 };
 
-
 /**
  * Check transaction status directly with eSewa
  */
-const checkEsewaTransactionStatus = async ({
-  transactionUuid,
-  totalAmount,
-}) => {
+const checkEsewaTransactionStatus = async ({ transactionUuid, totalAmount }) => {
   if (!transactionUuid) {
-    throw new Error(
-      "Transaction UUID is required"
-    );
+    throw new Error('Transaction UUID is required');
   }
 
   if (!totalAmount) {
-    throw new Error(
-      "Total amount is required"
-    );
+    throw new Error('Total amount is required');
   }
 
-  const statusUrl =
-    process.env.ESEWA_STATUS_URL;
+  const statusUrl = process.env.ESEWA_STATUS_URL;
 
   if (!statusUrl) {
-    throw new Error(
-      "ESEWA_STATUS_URL is not configured"
-    );
+    throw new Error('ESEWA_STATUS_URL is not configured');
   }
 
   const params = new URLSearchParams({
-    product_code:
-      process.env.ESEWA_PRODUCT_CODE,
+    product_code: process.env.ESEWA_PRODUCT_CODE,
 
     total_amount: Number(totalAmount).toFixed(2),
 
     transaction_uuid: transactionUuid,
   });
 
-  const response = await fetch(
-    `${statusUrl}?${params.toString()}`,
-    {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
-    }
-  );
+  const response = await fetch(`${statusUrl}?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
 
-  const data = await response.json();
+  const responseText = await response.text();
+  let data;
+
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    const error = new Error('eSewa returned an invalid transaction status response');
+    error.statusCode = 502;
+    throw error;
+  }
+
+  if (!response.ok || !data || typeof data !== 'object' || Array.isArray(data)) {
+    const error = new Error('Unable to retrieve eSewa transaction status');
+    error.statusCode = 502;
+    throw error;
+  }
+
+  const responseUuid = data.transaction_uuid || data.pid;
+  const responseAmount = data.total_amount ?? data.totalAmount;
+
+  if (
+    (responseUuid && responseUuid !== transactionUuid) ||
+    (responseAmount !== undefined &&
+      Number(responseAmount).toFixed(2) !== Number(totalAmount).toFixed(2))
+  ) {
+    const error = new Error('eSewa transaction status does not match the payment');
+    error.statusCode = 400;
+    throw error;
+  }
 
   return {
     success: response.ok,
 
     status: data.status,
 
-    transactionCode:
-      data.refId || null,
+    transactionCode: data.ref_id || data.refId || data.transaction_code || null,
 
-    transactionUuid:
-      data.pid || transactionUuid,
+    transactionUuid: responseUuid || transactionUuid,
 
-    totalAmount:
-      data.totalAmount || totalAmount,
+    totalAmount: responseAmount ?? totalAmount,
 
     rawData: data,
   };
 };
 
-
 module.exports = {
   createEsewaPayment,
   decodeEsewaResponse,
-  verifyEsewaPayment,
+  verifyEsewaPaymentResponse,
   checkEsewaTransactionStatus,
 };

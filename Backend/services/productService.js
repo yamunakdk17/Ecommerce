@@ -32,9 +32,10 @@ const getProductById = async (id) => {
  * Validate product data
  */
 const validateProduct = (data) => {
-  const { name, price, old_price, stock } = data;
+  const { name, price, stock } = data;
+  const oldPrice = data.old_price ?? data.oldPrice;
 
-  if (!name || !name.trim()) {
+  if (typeof name !== 'string' || !name.trim()) {
     const error = new Error('Product name is required');
     error.statusCode = 400;
     throw error;
@@ -46,24 +47,38 @@ const validateProduct = (data) => {
     throw error;
   }
 
-  if (Number(price) < 0) {
+  if (!Number.isFinite(Number(price)) || Number(price) < 0) {
     const error = new Error('Product price cannot be negative');
     error.statusCode = 400;
     throw error;
   }
 
   if (
-    old_price !== undefined &&
-    old_price !== null &&
-    old_price !== '' &&
-    Number(old_price) < 0
+    oldPrice !== undefined &&
+    oldPrice !== null &&
+    oldPrice !== '' &&
+    (!Number.isFinite(Number(oldPrice)) || Number(oldPrice) < 0)
   ) {
     const error = new Error('Old price cannot be negative');
     error.statusCode = 400;
     throw error;
   }
 
-  if (stock !== undefined && stock !== null && stock !== '' && Number(stock) < 0) {
+  if (
+    oldPrice !== undefined &&
+    oldPrice !== null &&
+    oldPrice !== '' &&
+    Number(oldPrice) <= Number(price)
+  ) {
+    const error = new Error('Original price must be greater than the sale price');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (  stock !== undefined &&
+  stock !== null &&
+  stock !== '' &&
+  (!Number.isSafeInteger(Number(stock)) || Number(stock) < 0)) {
     const error = new Error('Stock cannot be negative');
     error.statusCode = 400;
     throw error;
@@ -81,9 +96,11 @@ const createProduct = async (data) => {
     description: data.description?.trim() || null,
     price: Number(data.price),
     old_price:
-      data.old_price === undefined || data.old_price === null || data.old_price === ''
+      (data.old_price ?? data.oldPrice) === undefined ||
+      (data.old_price ?? data.oldPrice) === null ||
+      (data.old_price ?? data.oldPrice) === ''
         ? null
-        : Number(data.old_price),
+        : Number(data.old_price ?? data.oldPrice),
     image: data.image?.trim() || null,
     category: data.category?.trim() || null,
     stock:
@@ -119,9 +136,11 @@ const updateProduct = async (id, data) => {
     description: data.description?.trim() || null,
     price: Number(data.price),
     old_price:
-      data.old_price === undefined || data.old_price === null || data.old_price === ''
+      (data.old_price ?? data.oldPrice) === undefined ||
+      (data.old_price ?? data.oldPrice) === null ||
+      (data.old_price ?? data.oldPrice) === ''
         ? null
-        : Number(data.old_price),
+        : Number(data.old_price ?? data.oldPrice),
     image: data.image?.trim() || null,
     category: data.category?.trim() || null,
     stock:

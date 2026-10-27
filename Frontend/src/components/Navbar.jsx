@@ -1,12 +1,11 @@
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useStore } from "../context/storeContext.js";
-import { categories } from "../data/Products.js";
 import { useAuth } from "../context/authContext.js";
 import Icon from "./Icon.jsx";
 import logo from "../assets/idTO7v6m3N_logos.png";
 
 export default function Navbar() {
-  const { count, query, setQuery } = useStore();
+  const { count, query, setQuery, categories, storefront } = useStore();
   const go = useNavigate();
   const { pathname, search } = useLocation();
   const { user } = useAuth();
@@ -47,12 +46,18 @@ export default function Navbar() {
             <Icon name="search" size={18} />
           </button>
         </form>
-        <Link to={user ? "/dashboard" : "/login"} className="nav-signin border">
+        <Link to={user ? (user.role === "admin" ? "/admin" : "/dashboard") : "/login"} className="nav-signin border">
           <span className="nav-first">
             Hello, {user ? user.name.split(" ")[0] : "sign in"}
           </span>
           <span className="nav-second">Account &amp; Lists</span>
         </Link>
+        {user?.role === "admin" && (
+          <Link to="/admin" className="nav-return border">
+            <span className="nav-first">Admin</span>
+            <span className="nav-second">Dashboard</span>
+          </Link>
+        )}
         <Link to="/dashboard/orders" className="nav-return border">
           <span className="nav-first">Returns</span>
           <span className="nav-second">&amp; Orders</span>
@@ -99,6 +104,20 @@ export default function Navbar() {
           Browse clothing
         </Link>
       </nav>
+      {storefront.announcement && (
+        <div className="store-announcement" role="status">
+          {storefront.announcement}
+          {storefront.promotions?.length > 0 && (
+            <span>
+              {" "}
+              · Offers:{" "}
+              {storefront.promotions
+                .map((promotion) => `${promotion.code} (${promotion.discountPercent}% off)`)
+                .join(" · ")}
+            </span>
+          )}
+        </div>
+      )}
     </header>
   );
 }

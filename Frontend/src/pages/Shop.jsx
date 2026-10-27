@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import ProductCard from "../components/ProductCard.jsx";
 import { useStore } from "../context/storeContext.js";
-import { categories } from "../data/Products.js";
 
 const priceRanges = [
   { id: "any", label: "Any price", matches: () => true },
@@ -18,7 +17,7 @@ const priceRanges = [
 export default function Shop() {
   const { cat } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { products, query } = useStore();
+  const { products, query, categories } = useStore();
   const [sort, setSort] = useState("featured");
   const [priceRange, setPriceRange] = useState("any");
   const saleOnly = searchParams.get("deals") === "1";

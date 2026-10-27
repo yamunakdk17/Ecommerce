@@ -2,16 +2,15 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useStore } from '../context/storeContext.js';
 import { useAuth } from '../context/authContext.js';
-import { placeOrder } from '../api.js';
+import {
+  createEsewaPayment,
+  placeOrder,
+  validatePromotion,
+} from '../api.js';
 import { money } from '../utils.js';
 
-const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(
-  /\/+$/,
-  '',
-);
-
 export default function Checkout() {
-  const { lines, removeItems } = useStore();
+  const { lines, removePurchasedItems, storefront } = useStore();
   const { user } = useAuth();
 
   const [f, setF] = useState({
@@ -27,10 +26,23 @@ export default function Checkout() {
   const [selectedIds, setSelectedIds] = useState(
     () => new Set(lines.map((line) => String(line.id))),
   );
-
-  const selectedLines = lines.filter((line) =>
-    selectedIds.has(String(line.id)),
+  const [selectedQuantities, setSelectedQuantities] = useState(
+    () => Object.fromEntries(lines.map((line) => [String(line.id), 1])),
   );
+  const [promoCode, setPromoCode] = useState('');
+  const [promotionQuote, setPromotionQuote] = useState(null);
+  const [promotionError, setPromotionError] = useState('');
+  const [checkingPromotion, setCheckingPromotion] = useState(false);
+
+  const selectedLines = lines
+    .filter((line) => selectedIds.has(String(line.id)))
+    .map((line) => ({
+      ...line,
+      qty: Math.min(
+        line.qty,
+        Math.max(1, Number(selectedQuantities[String(line.id)]) || 1),
+      ),
+    }));
   const selectedCount = selectedLines.reduce((sum, line) => sum + line.qty, 0);
   const selectedTotal = selectedLines.reduce(
     (sum, line) => sum + Number(line.price) * line.qty,
@@ -43,20 +55,27 @@ export default function Checkout() {
       [k]: e.target.value,
     });
 
-  async function startEsewaPayment() {
-    const response = await fetch(`${API_URL}/payments/esewa/initiate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        amount: Number(selectedTotal),
-      }),
+  async function applyPromotion() {
+    setCheckingPromotion(true);
+    setPromotionError('');
+    setPromotionQuote(null);
+    try {
+      const result = await validatePromotion(promoCode, selectedTotal);
+      setPromotionQuote(result.data);
+    } catch (error) {
+      setPromotionError(error.message || 'Unable to apply promotion');
+    } finally {
+      setCheckingPromotion(false);
+    }
+  }
+
+  async function startEsewaPayment(order) {
+    const result = await createEsewaPayment({
+      amount: Number(order.total),
+      orderId: order.orderId,
     });
 
-    const result = await response.json();
-
-    if (!response.ok || !result.success) {
+    if (!result.success) {
       throw new Error(result.message || 'Unable to initialize eSewa payment');
     }
 
@@ -95,7 +114,19 @@ export default function Checkout() {
 
     try {
       if (paymentMethod === 'ESEWA') {
-        await startEsewaPayment();
+        const order = await placeOrder({
+          customer: f,
+          items: selectedLines.map(({ id, qty }) => ({ id, qty })),
+          paymentMethod,
+          promoCode: promoCode.trim() || undefined,
+        });
+        sessionStorage.setItem(
+          'bm_pending_esewa_items',
+          JSON.stringify(
+            selectedLines.map(({ id, qty }) => ({ id, qty })),
+          ),
+        );
+        await startEsewaPayment(order);
         return;
       }
 
@@ -111,10 +142,14 @@ export default function Checkout() {
         await placeOrder({
           customer: f,
           items,
+          paymentMethod,
+          promoCode: promoCode.trim() || undefined,
         }),
       );
 
-      removeItems(selectedLines.map((line) => line.id));
+      removePurchasedItems(
+        selectedLines.map(({ id, qty }) => ({ id, qty })),
+      );
     } catch (x) {
       console.error(x);
       setErr(x.message || 'Something went wrong');
@@ -211,15 +246,33 @@ export default function Checkout() {
         <h2 className="mt">3. Your items</h2>
         <p className="checkout-selection-help">
           Select the items you want to buy now. Unselected items stay in your cart
-          for later.
+          for later. Each selected item starts at 1; adjust the quantity below.
         </p>
+        {storefront.promotions?.length > 0 && (
+          <div className="checkout-promotions">
+            {storefront.promotions.map((promotion) => (
+              <p key={promotion.id}>
+                <strong>{promotion.code}</strong> — {promotion.discountPercent}% off
+                {promotion.description ? `: ${promotion.description}` : ''}
+              </p>
+            ))}
+          </div>
+        )}
 
-        {lines.map((l) => (
+        {lines.map((l) => {
+          const id = String(l.id);
+          const isSelected = selectedIds.has(id);
+          const quantity = Math.min(
+            l.qty,
+            Math.max(1, Number(selectedQuantities[id]) || 1),
+          );
+
+          return (
           <div className="line" key={l.id}>
             <label className="checkout-item-select">
               <input
                 type="checkbox"
-                checked={selectedIds.has(String(l.id))}
+                checked={isSelected}
                 onChange={(event) => {
                   setSelectedIds((current) => {
                     const next = new Set(current);
@@ -237,20 +290,57 @@ export default function Checkout() {
               {l.name}
 
               <div className="price">
-                {money(l.price)} × {l.qty}
+                {money(l.price)} each · {l.qty} in cart
               </div>
             </div>
 
-            <b>{money(l.price * l.qty)}</b>
+            <div className="checkout-quantity">
+              <span>Buy quantity</span>
+              <div className="qty">
+                <button
+                  type="button"
+                  aria-label={`Buy one fewer ${l.name}`}
+                  disabled={!isSelected || quantity <= 1}
+                  onClick={() =>
+                    setSelectedQuantities((current) => ({
+                      ...current,
+                      [id]: quantity - 1,
+                    }))
+                  }
+                >
+                  −
+                </button>
+                <span>{quantity}</span>
+                <button
+                  type="button"
+                  aria-label={`Buy one more ${l.name}`}
+                  disabled={!isSelected || quantity >= l.qty}
+                  onClick={() =>
+                    setSelectedQuantities((current) => ({
+                      ...current,
+                      [id]: quantity + 1,
+                    }))
+                  }
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <b>{money(l.price * quantity)}</b>
             <button
               className="btn outline checkout-buy-one"
               type="button"
-              onClick={() => setSelectedIds(new Set([String(l.id)]))}
+              onClick={() => {
+                setSelectedIds(new Set([id]));
+                setSelectedQuantities((current) => ({ ...current, [id]: 1 }));
+              }}
             >
               Buy only this
             </button>
           </div>
-        ))}
+          );
+        })}
       </section>
 
       <aside className="section checkout">
@@ -266,9 +356,42 @@ export default function Checkout() {
           <b>Free</b>
         </div>
 
+        {promotionQuote && (
+          <div className="sum">
+            <span>Promotion ({promotionQuote.code})</span>
+            <b>−{money(promotionQuote.discountAmount)}</b>
+          </div>
+        )}
+
         <div className="sum big">
           <span>Total</span>
-          <b>{money(selectedTotal)}</b>
+          <b>{money(promotionQuote?.total ?? selectedTotal)}</b>
+        </div>
+
+        <div className="checkout-promo-field">
+          <label htmlFor="checkout-promo-code">Promotion code</label>
+          <div className="checkout-promo-controls">
+            <input
+              id="checkout-promo-code"
+              value={promoCode}
+              onChange={(event) => {
+                setPromoCode(event.target.value.toUpperCase());
+                setPromotionQuote(null);
+                setPromotionError('');
+              }}
+              placeholder="Enter promo code"
+              autoComplete="off"
+            />
+            <button
+              className="btn outline"
+              type="button"
+              disabled={checkingPromotion || !promoCode.trim() || !selectedCount}
+              onClick={applyPromotion}
+            >
+              {checkingPromotion ? 'Checking…' : 'Apply'}
+            </button>
+          </div>
+          {promotionError && <p className="bad">{promotionError}</p>}
         </div>
 
         {!selectedCount && <p>Select at least one item to continue.</p>}

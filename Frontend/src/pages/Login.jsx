@@ -15,10 +15,10 @@ export default function Login() {
     setBusy(true);
     setErr("");
     try {
-      await login(f);
+      const account = await login(f);
       const to = next || "/dashboard";
       setNext("/dashboard");
-      go(to);
+      go(account.role === "admin" ? "/admin" : to);
     } catch (x) {
       setErr(x.message);
     }

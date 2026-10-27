@@ -2,33 +2,37 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useStore } from '../context/StoreContext.js';
 import { useAuth } from '../context/authContext.js';
-import {
-  createEsewaPayment,
-  placeOrder,
-  validatePromotion,
-} from '../api.js';
+import { createEsewaPayment, placeOrder, validatePromotion } from '../api.js';
 import { money } from '../utils.js';
+
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(
+  /\/+$/,
+  '',
+);
 
 export default function Checkout() {
   const { lines, removePurchasedItems, storefront } = useStore();
   const { user } = useAuth();
 
   const [f, setF] = useState({
-    name: user.name,
-    phone: user.phone || '',
-    address: user.address || '',
+    name: user?.name || '',
+    phone: user?.phone || '',
+    address: user?.address || '',
   });
 
   const [paymentMethod, setPaymentMethod] = useState('COD');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
+
   const [selectedIds, setSelectedIds] = useState(
     () => new Set(lines.map((line) => String(line.id))),
   );
-  const [selectedQuantities, setSelectedQuantities] = useState(
-    () => Object.fromEntries(lines.map((line) => [String(line.id), 1])),
+
+  const [selectedQuantities, setSelectedQuantities] = useState(() =>
+    Object.fromEntries(lines.map((line) => [String(line.id), 1])),
   );
+
   const [promoCode, setPromoCode] = useState('');
   const [promotionQuote, setPromotionQuote] = useState(null);
   const [promotionError, setPromotionError] = useState('');
@@ -43,24 +47,30 @@ export default function Checkout() {
         Math.max(1, Number(selectedQuantities[String(line.id)]) || 1),
       ),
     }));
+
   const selectedCount = selectedLines.reduce((sum, line) => sum + line.qty, 0);
+
   const selectedTotal = selectedLines.reduce(
     (sum, line) => sum + Number(line.price) * line.qty,
     0,
   );
 
-  const set = (k) => (e) =>
-    setF({
-      ...f,
-      [k]: e.target.value,
-    });
+  const finalTotal = Number(promotionQuote?.total ?? selectedTotal);
+
+  const set = (key) => (event) =>
+    setF((current) => ({
+      ...current,
+      [key]: event.target.value,
+    }));
 
   async function applyPromotion() {
     setCheckingPromotion(true);
     setPromotionError('');
     setPromotionQuote(null);
+
     try {
       const result = await validatePromotion(promoCode, selectedTotal);
+
       setPromotionQuote(result.data);
     } catch (error) {
       setPromotionError(error.message || 'Unable to apply promotion');
@@ -101,8 +111,74 @@ export default function Checkout() {
     form.submit();
   }
 
-  async function submit(e) {
-    e.preventDefault();
+  async function startKhaltiPayment(order) {
+    const response = await fetch(`${API_URL}/payments/khalti/initiate`, {
+      method: 'POST',
+
+      headers: {
+        'Content-Type': 'application/json',
+      },
+
+      body: JSON.stringify({
+        orderId: order.orderId,
+
+        amount: Number(order.total),
+
+        customer: {
+          name: f.name,
+          email: user?.email || '',
+          phone: f.phone,
+        },
+
+        items: selectedLines.map((item) => ({
+          productId: item.id,
+          name: item.name,
+          price: Number(item.price),
+          qty: Number(item.qty),
+        })),
+      }),
+    });
+
+    const responseText = await response.text();
+
+    let result;
+
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      throw new Error('Backend returned an invalid Khalti response');
+    }
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || 'Unable to initialize Khalti payment');
+    }
+
+    if (!result.data?.paymentUrl) {
+      throw new Error('Khalti payment URL was not returned');
+    }
+
+    /*
+     * PaymentSuccess.jsx uses this to remove the
+     * purchased items after successful payment.
+     */
+    sessionStorage.setItem(
+      'bm_pending_payment_items',
+      JSON.stringify(
+        selectedLines.map(({ id, qty }) => ({
+          id,
+          qty,
+        })),
+      ),
+    );
+
+    /*
+     * Redirect user to Khalti.
+     */
+    window.location.href = result.data.paymentUrl;
+  }
+
+  async function submit(event) {
+    event.preventDefault();
 
     if (!selectedLines.length) {
       setErr('Choose at least one item to buy now.');
@@ -113,79 +189,71 @@ export default function Checkout() {
     setErr('');
 
     try {
+      /*
+       * Create the order FIRST.
+       *
+       * This is required for both eSewa and Khalti because
+       * the payment must be connected to an existing order.
+       */
+      const order = await placeOrder({
+        customer: f,
+
+        items: selectedLines.map(({ id, qty }) => ({
+          id,
+          qty,
+        })),
+
+        paymentMethod,
+
+        promoCode: promoCode.trim() || undefined,
+      });
+
+      /*
+       * eSewa
+       */
       if (paymentMethod === 'ESEWA') {
-        const order = await placeOrder({
-          customer: f,
-          items: selectedLines.map(({ id, qty }) => ({ id, qty })),
-          paymentMethod,
-          promoCode: promoCode.trim() || undefined,
-        });
         sessionStorage.setItem(
           'bm_pending_esewa_items',
           JSON.stringify(
-            selectedLines.map(({ id, qty }) => ({ id, qty })),
+            selectedLines.map(({ id, qty }) => ({
+              id,
+              qty,
+            })),
           ),
         );
+
         await startEsewaPayment(order);
+
         return;
       }
+
+      /*
+       * Khalti
+       */
       if (paymentMethod === 'KHALTI') {
-        const response = await fetch(`${API_URL}/payments/khalti/initiate`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            orderId: order.id,
-            amount: order.total,
-            customer: {
-              name: customer.name,
-              email: customer.email,
-              phone: customer.phone,
-            },
-            items: cartItems.map((item) => ({
-              productId: item.id,
-              name: item.name,
-              price: item.price,
-              qty: item.qty,
-            })),
-          }),
-        });
+        await startKhaltiPayment(order);
 
-        const result = await response.json();
-
-        if (!response.ok || !result.success) {
-          throw new Error(result.message || 'Unable to start Khalti payment');
-        }
-
-        window.location.href = result.data.paymentUrl;
+        return;
       }
 
-      
-
-      const items = selectedLines.map((l) => ({
-        id: l.id,
-        qty: l.qty,
-        name: l.name,
-        image: l.image,
-        price: l.price,
-      }));
-
-      setDone(
-        await placeOrder({
-          customer: f,
-          items,
-          paymentMethod,
-          promoCode: promoCode.trim() || undefined,
-        }),
-      );
+      /*
+       * Cash on Delivery
+       */
+      setDone(order);
 
       removePurchasedItems(
-        selectedLines.map(({ id, qty }) => ({ id, qty })),
+        selectedLines.map(({ id, qty }) => ({
+          id,
+          qty,
+        })),
       );
-    } catch (x) {
-      console.error(x);
-      setErr(x.message || 'Something went wrong');
+
+      setBusy(false);
+    } catch (error) {
+      console.error('Checkout error:', error);
+
+      setErr(error.message || 'Something went wrong while placing your order.');
+
       setBusy(false);
     }
   }
@@ -197,8 +265,14 @@ export default function Checkout() {
           <h2>Thank you, your order is placed!</h2>
 
           <p>
-            Order <b>#{done.orderId}</b> · Total <b>{money(done.total)}</b> · Pay on
-            delivery
+            Order <b>#{done.orderId}</b> · Total <b>{money(done.total)}</b>
+          </p>
+
+          <p>
+            Payment:{' '}
+            <b>
+              {done.paymentMethod === 'COD' ? 'Cash on Delivery' : done.paymentMethod}
+            </b>
           </p>
 
           <p>
@@ -254,6 +328,7 @@ export default function Checkout() {
 
         <h2 className="mt">2. Payment method</h2>
 
+        {/* COD */}
         <label className="pay">
           <input
             type="radio"
@@ -265,6 +340,7 @@ export default function Checkout() {
           Cash on Delivery
         </label>
 
+        {/* eSewa */}
         <label className="pay">
           <input
             type="radio"
@@ -276,11 +352,25 @@ export default function Checkout() {
           🟢 Pay with eSewa
         </label>
 
+        {/* Khalti */}
+        <label className="pay">
+          <input
+            type="radio"
+            name="paymentMethod"
+            value="KHALTI"
+            checked={paymentMethod === 'KHALTI'}
+            onChange={() => setPaymentMethod('KHALTI')}
+          />
+          🟣 Pay with Khalti
+        </label>
+
         <h2 className="mt">3. Your items</h2>
+
         <p className="checkout-selection-help">
-          Select the items you want to buy now. Unselected items stay in your cart
-          for later. Each selected item starts at 1; adjust the quantity below.
+          Select the items you want to buy now. Unselected items stay in your cart for
+          later.
         </p>
+
         {storefront.promotions?.length > 0 && (
           <div className="checkout-promotions">
             {storefront.promotions.map((promotion) => (
@@ -292,86 +382,99 @@ export default function Checkout() {
           </div>
         )}
 
-        {lines.map((l) => {
-          const id = String(l.id);
+        {lines.map((line) => {
+          const id = String(line.id);
+
           const isSelected = selectedIds.has(id);
+
           const quantity = Math.min(
-            l.qty,
+            line.qty,
             Math.max(1, Number(selectedQuantities[id]) || 1),
           );
 
           return (
-          <div className="line" key={l.id}>
-            <label className="checkout-item-select">
-              <input
-                type="checkbox"
-                checked={isSelected}
-                onChange={(event) => {
-                  setSelectedIds((current) => {
-                    const next = new Set(current);
-                    if (event.target.checked) next.add(String(l.id));
-                    else next.delete(String(l.id));
-                    return next;
-                  });
-                }}
-                aria-label={`Buy ${l.name} now`}
-              />
-            </label>
-            <img src={l.image} alt={l.name} />
+            <div className="line" key={line.id}>
+              <label className="checkout-item-select">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={(event) => {
+                    setSelectedIds((current) => {
+                      const next = new Set(current);
 
-            <div className="grow">
-              {l.name}
+                      if (event.target.checked) {
+                        next.add(id);
+                      } else {
+                        next.delete(id);
+                      }
 
-              <div className="price">
-                {money(l.price)} each · {l.qty} in cart
+                      return next;
+                    });
+                  }}
+                  aria-label={`Buy ${line.name} now`}
+                />
+              </label>
+
+              <img src={line.image} alt={line.name} />
+
+              <div className="grow">
+                {line.name}
+
+                <div className="price">
+                  {money(line.price)} each · {line.qty} in cart
+                </div>
               </div>
-            </div>
 
-            <div className="checkout-quantity">
-              <span>Buy quantity</span>
-              <div className="qty">
-                <button
-                  type="button"
-                  aria-label={`Buy one fewer ${l.name}`}
-                  disabled={!isSelected || quantity <= 1}
-                  onClick={() =>
-                    setSelectedQuantities((current) => ({
-                      ...current,
-                      [id]: quantity - 1,
-                    }))
-                  }
-                >
-                  −
-                </button>
-                <span>{quantity}</span>
-                <button
-                  type="button"
-                  aria-label={`Buy one more ${l.name}`}
-                  disabled={!isSelected || quantity >= l.qty}
-                  onClick={() =>
-                    setSelectedQuantities((current) => ({
-                      ...current,
-                      [id]: quantity + 1,
-                    }))
-                  }
-                >
-                  +
-                </button>
+              <div className="checkout-quantity">
+                <span>Buy quantity</span>
+
+                <div className="qty">
+                  <button
+                    type="button"
+                    aria-label={`Buy one fewer ${line.name}`}
+                    disabled={!isSelected || quantity <= 1}
+                    onClick={() =>
+                      setSelectedQuantities((current) => ({
+                        ...current,
+                        [id]: quantity - 1,
+                      }))
+                    }>
+                    −
+                  </button>
+
+                  <span>{quantity}</span>
+
+                  <button
+                    type="button"
+                    aria-label={`Buy one more ${line.name}`}
+                    disabled={!isSelected || quantity >= line.qty}
+                    onClick={() =>
+                      setSelectedQuantities((current) => ({
+                        ...current,
+                        [id]: quantity + 1,
+                      }))
+                    }>
+                    +
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <b>{money(l.price * quantity)}</b>
-            <button
-              className="btn outline checkout-buy-one"
-              type="button"
-              onClick={() => {
-                setSelectedIds(new Set([id]));
-                setSelectedQuantities((current) => ({ ...current, [id]: 1 }));
-              }}
-            >
-              Buy only this
-            </button>
-          </div>
+              <b>{money(line.price * quantity)}</b>
+
+              <button
+                className="btn outline checkout-buy-one"
+                type="button"
+                onClick={() => {
+                  setSelectedIds(new Set([id]));
+
+                  setSelectedQuantities((current) => ({
+                    ...current,
+                    [id]: 1,
+                  }));
+                }}>
+                Buy only this
+              </button>
+            </div>
           );
         })}
       </section>
@@ -381,6 +484,7 @@ export default function Checkout() {
 
         <div className="sum">
           <span>Items ({selectedCount})</span>
+
           <b>{money(selectedTotal)}</b>
         </div>
 
@@ -392,38 +496,43 @@ export default function Checkout() {
         {promotionQuote && (
           <div className="sum">
             <span>Promotion ({promotionQuote.code})</span>
+
             <b>−{money(promotionQuote.discountAmount)}</b>
           </div>
         )}
 
         <div className="sum big">
           <span>Total</span>
-          <b>{money(promotionQuote?.total ?? selectedTotal)}</b>
+
+          <b>{money(finalTotal)}</b>
         </div>
 
         <div className="checkout-promo-field">
           <label htmlFor="checkout-promo-code">Promotion code</label>
+
           <div className="checkout-promo-controls">
             <input
               id="checkout-promo-code"
               value={promoCode}
               onChange={(event) => {
                 setPromoCode(event.target.value.toUpperCase());
+
                 setPromotionQuote(null);
                 setPromotionError('');
               }}
               placeholder="Enter promo code"
               autoComplete="off"
             />
+
             <button
               className="btn outline"
               type="button"
               disabled={checkingPromotion || !promoCode.trim() || !selectedCount}
-              onClick={applyPromotion}
-            >
+              onClick={applyPromotion}>
               {checkingPromotion ? 'Checking…' : 'Apply'}
             </button>
           </div>
+
           {promotionError && <p className="bad">{promotionError}</p>}
         </div>
 
@@ -433,16 +542,24 @@ export default function Checkout() {
           <p>Payment will continue through the eSewa test gateway.</p>
         )}
 
+        {paymentMethod === 'KHALTI' && (
+          <p>Payment will continue through the Khalti test gateway.</p>
+        )}
+
         {err && <p className="bad">{err}</p>}
 
         <button className="btn" disabled={busy || !selectedCount}>
           {busy
             ? paymentMethod === 'ESEWA'
               ? 'Connecting to eSewa...'
-              : 'Placing order...'
+              : paymentMethod === 'KHALTI'
+                ? 'Connecting to Khalti...'
+                : 'Placing order...'
             : paymentMethod === 'ESEWA'
               ? 'Pay with eSewa'
-              : 'Place order'}
+              : paymentMethod === 'KHALTI'
+                ? 'Pay with Khalti'
+                : 'Place order'}
         </button>
       </aside>
     </form>

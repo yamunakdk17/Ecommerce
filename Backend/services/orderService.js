@@ -382,40 +382,65 @@ const setEsewaTransaction = async (
 
 const cancelUnpaidOrder = async (orderId, userId) => {
   await ensureTables();
+
   const connection = await db.getConnection();
+
   try {
     await connection.beginTransaction();
+
     const [orders] = await connection.query(
-      `SELECT id FROM orders
-       WHERE id = ? AND user_id = ? AND payment_method = 'ESEWA'
-         AND payment_status = 'pending' AND transaction_uuid IS NULL
+      `SELECT id
+       FROM orders
+       WHERE id = ?
+         AND user_id = ?
+         AND payment_method IN ('ESEWA', 'KHALTI')
+         AND payment_status = 'pending'
+         AND order_status = 'awaiting_payment'
+         AND transaction_uuid IS NULL
+         AND khalti_pidx IS NULL
        FOR UPDATE`,
       [orderId, userId],
     );
+
     if (!orders[0]) {
       await connection.rollback();
       return;
     }
 
     const [items] = await connection.query(
-      'SELECT product_id AS productId, quantity AS qty FROM order_items WHERE order_id = ?',
+      `SELECT product_id AS productId, quantity AS qty
+       FROM order_items
+       WHERE order_id = ?`,
       [orderId],
     );
+
+    // Restore product stock
     for (const item of items) {
       await connection.query(
-        'UPDATE products SET stock = stock + ? WHERE id = ?',
+        `UPDATE products
+         SET stock = stock + ?
+         WHERE id = ?`,
         [item.qty, item.productId],
       );
     }
+
+    // Cancel order
     await connection.query(
-      `UPDATE orders SET order_status = 'cancelled', payment_status = 'failed'
+      `UPDATE orders
+       SET order_status = 'cancelled',
+           payment_status = 'failed'
        WHERE id = ?`,
       [orderId],
     );
+
+    // Mark payment as failed
     await connection.query(
-      "UPDATE payments SET status = 'FAILED' WHERE order_id = ?",
+      `UPDATE payments
+       SET status = 'FAILED'
+       WHERE order_id = ?`,
       [orderId],
     );
+
     await connection.commit();
   } catch (error) {
     await connection.rollback();

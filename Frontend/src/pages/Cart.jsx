@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useStore } from "../context/storeContext.js";
+import { useStore } from "../context/StoreContext.js";
 import { useAuth } from "../context/authContext.js";
 import { money } from "../utils.js";
 
@@ -31,7 +31,14 @@ export default function Cart() {
         <h2>Shopping cart ({count})</h2>
         {lines.map((line) => (
           <div className="line" key={line.id}>
-            <img src={line.image} alt={line.name} />
+            <img
+              src={line.image || "/product-placeholder.svg"}
+              alt={line.name}
+              onError={(event) => {
+                event.currentTarget.onerror = null;
+                event.currentTarget.src = "/product-placeholder.svg";
+              }}
+            />
             <div className="grow">
               <Link to={`/product/${line.id}`}>{line.name}</Link>
               <div className="price">{money(line.price)}</div>

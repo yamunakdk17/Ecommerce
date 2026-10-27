@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useStore } from '../context/storeContext.js';
+import { useStore } from '../context/StoreContext.js';
 import { useAuth } from '../context/authContext.js';
 import {
   createEsewaPayment,

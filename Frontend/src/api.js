@@ -93,6 +93,13 @@ function mock(path, options) {
 }
 
 export const getProducts = () => request("/products");
+export const getProductReviews = (productId) =>
+  request(`/products/${productId}/reviews`);
+export const submitProductReview = (productId, review) =>
+  request(`/products/${productId}/reviews`, {
+    method: "POST",
+    body: JSON.stringify(review),
+  });
 export const getStorefrontData = () => request("/storefront");
 export const validatePromotion = (code, subtotal) =>
   request("/storefront/promotions/validate", {

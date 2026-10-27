@@ -1,5 +1,15 @@
 const productModel = require('../models/productModel');
 
+const normalizeCategory = (category) =>
+  typeof category === 'string'
+    ? category
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+    : '';
+
 /**
  * Get all products
  */
@@ -26,6 +36,35 @@ const getProductById = async (id) => {
   }
 
   return product;
+};
+
+const getProductReviews = async (id) => {
+  const product = await getProductById(id);
+  return productModel.getProductReviews(product.id);
+};
+
+const submitProductReview = async (id, userId, data) => {
+  const product = await getProductById(id);
+  const rating = Number(data?.rating);
+  const review = typeof data?.review === 'string' ? data.review.trim() : '';
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    const error = new Error('Rating must be a whole number from 1 to 5');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (review.length > 3000) {
+    const error = new Error('Review must be 3,000 characters or fewer');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return productModel.saveProductReview({
+    productId: product.id,
+    userId,
+    rating,
+    review,
+  });
 };
 
 /**
@@ -102,7 +141,7 @@ const createProduct = async (data) => {
         ? null
         : Number(data.old_price ?? data.oldPrice),
     image: data.image?.trim() || null,
-    category: data.category?.trim() || null,
+    category: normalizeCategory(data.category) || null,
     stock:
       data.stock === undefined || data.stock === null || data.stock === ''
         ? 0
@@ -142,7 +181,7 @@ const updateProduct = async (id, data) => {
         ? null
         : Number(data.old_price ?? data.oldPrice),
     image: data.image?.trim() || null,
-    category: data.category?.trim() || null,
+    category: normalizeCategory(data.category) || null,
     stock:
       data.stock === undefined || data.stock === null || data.stock === ''
         ? 0
@@ -180,6 +219,8 @@ const deleteProduct = async (id) => {
 module.exports = {
   getAllProducts,
   getProductById,
+  getProductReviews,
+  submitProductReview,
   createProduct,
   updateProduct,
   deleteProduct,

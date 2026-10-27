@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/authContext.js";
-import { useStore } from "../context/storeContext.js";
+import { useStore } from "../context/StoreContext.js";
 import { getOrders, isDemo } from "../api.js";
 import { money, fmtDate } from "../utils.js";
 

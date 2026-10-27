@@ -34,6 +34,32 @@ const getProduct = async (req, res, next) => {
   }
 };
 
+const getProductReviews = async (req, res, next) => {
+  try {
+    const reviews = await productService.getProductReviews(req.params.id);
+    res.status(200).json({ success: true, data: reviews });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const submitProductReview = async (req, res, next) => {
+  try {
+    const reviews = await productService.submitProductReview(
+      req.params.id,
+      req.user.id,
+      req.body || {},
+    );
+    res.status(201).json({
+      success: true,
+      message: 'Your review has been saved',
+      data: reviews,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * POST /api/products
  * Create product
@@ -91,6 +117,8 @@ const deleteProduct = async (req, res, next) => {
 module.exports = {
   getProducts,
   getProduct,
+  getProductReviews,
+  submitProductReview,
   createProduct,
   updateProduct,
   deleteProduct,

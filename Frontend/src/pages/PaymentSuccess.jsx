@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useStore } from '../context/storeContext.js';
+import { useStore } from '../context/StoreContext.js';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(
   /\/+$/,

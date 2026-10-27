@@ -11,7 +11,7 @@ import {
   updateAdminProduct,
   updateStoreSettings,
 } from "../api.js";
-import { useStore } from "../context/storeContext.js";
+import { useStore } from "../context/StoreContext.js";
 import { money, fmtDate } from "../utils.js";
 
 const tabs = [
@@ -27,7 +27,7 @@ const blankProduct = {
   description: "",
   category: "",
   price: "",
-  old_price: "",
+  oldPrice: "",
   stock: "0",
   image: "",
 };
@@ -260,7 +260,7 @@ export default function Admin() {
                   <label>Product name<input required value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} /></label>
                   <label>Category<input required value={productForm.category} onChange={(e) => setProductForm({ ...productForm, category: e.target.value.toLowerCase().trim().replace(/\s+/g, "-") })} placeholder="e.g. dresses" /></label>
                   <label>Sale price (Rs.)<input required type="number" min="0" step="0.01" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} /></label>
-                  <label>Original price (Rs.)<input type="number" min="0" step="0.01" value={productForm.old_price} onChange={(e) => setProductForm({ ...productForm, old_price: e.target.value })} /></label>
+                  <label>Original price (Rs.)<input type="number" min="0" step="0.01" value={productForm.oldPrice} onChange={(e) => setProductForm({ ...productForm, oldPrice: e.target.value })} /></label>
                   <label>Stock quantity<input required type="number" min="0" step="1" value={productForm.stock} onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })} /></label>
                   <label>Image URL<input value={productForm.image} onChange={(e) => setProductForm({ ...productForm, image: e.target.value })} /></label>
                   <label className="admin-form-wide">Description<textarea rows="3" value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} /></label>
@@ -268,23 +268,31 @@ export default function Admin() {
                 </form>
                 <div className="admin-table-wrap">
                   <table className="admin-table">
-                    <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Discount</th><th>Stock</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Discount</th><th>Rating</th><th>Reviews</th><th>Stock</th><th>Actions</th></tr></thead>
                     <tbody>
+                      {products.length === 0 && (
+                        <tr><td colSpan="8">No products in the catalog yet.</td></tr>
+                      )}
                       {products.map((product) => {
-                        const originalPrice = Number(product.old_price ?? product.oldPrice) || 0;
+                        const originalPrice = Number(product.oldPrice) || 0;
                         const price = Number(product.price);
                         const discount = originalPrice > price ? Math.round((1 - price / originalPrice) * 100) : 0;
                         return (
                           <tr key={product.id}>
-                            <td><div className="admin-product-cell">{product.image && <img src={product.image} alt="" />}<strong>{product.name}</strong></div></td>
+                            <td><div className="admin-product-cell"><img src={product.image || "/product-placeholder.svg"} alt="" onError={(event) => {
+                              event.currentTarget.onerror = null;
+                              event.currentTarget.src = "/product-placeholder.svg";
+                            }} /><strong>{product.name}</strong></div></td>
                             <td>{product.category || "—"}</td>
                             <td>{money(price)}{originalPrice > price && <small className="admin-subtext"><s>{money(originalPrice)}</s></small>}</td>
                             <td>{discount ? `${discount}%` : "—"}</td>
+                            <td>{product.rating == null ? "—" : `★ ${Number(product.rating).toFixed(1)}`}</td>
+                            <td>{product.reviewCount}</td>
                             <td>{product.stock}</td>
                             <td className="admin-actions">
                               <button type="button" className="btn outline" onClick={() => {
                                 setEditingProduct(product.id);
-                                setProductForm({ name: product.name, description: product.description || "", category: product.category || "", price: String(product.price), old_price: originalPrice ? String(originalPrice) : "", stock: String(product.stock), image: product.image || "" });
+                                setProductForm({ name: product.name, description: product.description || "", category: product.category || "", price: String(product.price), oldPrice: originalPrice ? String(originalPrice) : "", stock: String(product.stock), image: product.image || "" });
                                 window.scrollTo({ top: 0, behavior: "smooth" });
                               }}>Edit</button>
                               <button type="button" className="btn danger" disabled={busy} onClick={async () => {

@@ -1,4 +1,4 @@
-import { useStore } from "../context/storeContext.js";
+import { useStore } from "../context/StoreContext.js";
 
 export default function Toast() {
   const { toast } = useStore();

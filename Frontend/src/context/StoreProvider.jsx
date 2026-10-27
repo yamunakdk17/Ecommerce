@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getProducts, getStorefrontData } from "../api.js";
-import { categories as localCategories, localProducts } from "../data/Products.js";
+import { categoryImages } from "../data/Products.js";
 import { ls } from "../utils.js";
-import { StoreContext } from "./storeContext.js";
+import { StoreContext } from "./StoreContext.js";
+
 const CART_KEY = "bm_cart";
 
 function readCart() {
@@ -14,8 +15,39 @@ function readCart() {
   }
 }
 
+function normalizeCategory(category) {
+  return String(category || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function normalizeProduct(product) {
+  return {
+    ...product,
+    id: product.id,
+    price: Number(product.price),
+    oldPrice:
+      product.oldPrice === null || product.oldPrice === undefined
+        ? null
+        : Number(product.oldPrice),
+    image: typeof product.image === "string" ? product.image.trim() : "",
+    category: normalizeCategory(product.category),
+    stock: Number.isFinite(Number(product.stock)) ? Number(product.stock) : 0,
+    rating:
+      product.rating === null || product.rating === undefined
+        ? null
+        : Number(product.rating),
+    reviewCount: Number(product.reviewCount) || 0,
+  };
+}
+
 export function StoreProvider({ children }) {
-  const [products, setProducts] = useState(localProducts);
+  const [products, setProducts] = useState([]);
+  const [productLoading, setProductLoading] = useState(true);
+  const [productError, setProductError] = useState("");
   const [storefront, setStorefront] = useState({
     storeName: "Basemark",
     announcement: "",
@@ -26,59 +58,66 @@ export function StoreProvider({ children }) {
   const [toast, setToast] = useState("");
 
   const refreshProducts = useCallback(async () => {
-    const result = await getProducts();
-    const rows = Array.isArray(result)
-      ? result
-      : result?.data || result?.products;
-    if (Array.isArray(rows)) {
-      setProducts(
-        rows.map((product) => ({
-          ...product,
-          id: product.id,
-          price: Number(product.price),
-          oldPrice: Number(product.oldPrice ?? product.old_price) || null,
-          category: product.category || "",
-          stock: Number(product.stock) || 0,
-        })),
+    setProductLoading(true);
+    setProductError("");
+    try {
+      const result = await getProducts();
+      if (result?.success === false) {
+        throw new Error(result.message || "Product request failed");
+      }
+      const rows = Array.isArray(result) ? result : result?.data;
+      if (!Array.isArray(rows)) {
+        throw new Error("The products endpoint returned an invalid catalog");
+      }
+      const normalized = rows.map(normalizeProduct);
+      setProducts(normalized);
+      setLines((current) =>
+        current.map((line) => {
+          const currentProduct = normalized.find(
+            (product) => String(product.id) === String(line.id),
+          );
+          return currentProduct ? { ...currentProduct, qty: line.qty } : line;
+        }),
       );
+      return normalized;
+    } catch (error) {
+      console.error("Unable to load product catalog:", error);
+      setProducts([]);
+      setProductError("The product catalog could not be loaded. Please try again.");
+      throw error;
+    } finally {
+      setProductLoading(false);
     }
   }, []);
 
   useEffect(() => {
     let active = true;
     Promise.resolve()
-      .then(refreshProducts)
-      .catch(() => {
-        // Keep the bundled catalog when the products endpoint is unavailable.
-      });
+      .then(() => (active ? refreshProducts() : undefined))
+      .catch(() => {});
     getStorefrontData()
       .then((result) => {
         if (active && result?.data) setStorefront(result.data);
       })
-      .catch(() => {
-        // Keep default store details when the API is unavailable.
+      .catch((error) => {
+        console.error("Unable to load storefront details:", error);
       });
     return () => {
       active = false;
     };
   }, [refreshProducts]);
 
-  const categories = [
-    ...localCategories.filter((category) =>
-      products.some((product) => product.category === category.slug),
-    ),
-    ...[...new Set(products.map((product) => product.category).filter(Boolean))]
-      .filter(
-        (slug) => !localCategories.some((category) => category.slug === slug),
-      )
-      .map((slug) => ({
-        slug,
-        name: slug
-          .split(/[-_\s]+/)
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-      })),
-  ];
+  const categories = useMemo(() => {
+    const slugs = [...new Set(products.map((product) => product.category).filter(Boolean))];
+    return slugs.map((slug) => ({
+      slug,
+      name: slug
+        .split("-")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
+      image: categoryImages[slug] || "",
+    }));
+  }, [products]);
 
   useEffect(() => {
     ls.set(CART_KEY, JSON.stringify(lines));
@@ -94,9 +133,10 @@ export function StoreProvider({ children }) {
   };
 
   const add = (productOrId, quantity = 1) => {
-    const product = typeof productOrId === "object"
-      ? productOrId
-      : products.find((item) => String(item.id) === String(productOrId));
+    const product =
+      typeof productOrId === "object"
+        ? productOrId
+        : products.find((item) => String(item.id) === String(productOrId));
     const amount = Math.max(1, Number(quantity) || 1);
     if (!product) return;
 
@@ -142,12 +182,10 @@ export function StoreProvider({ children }) {
     const purchasedQuantities = new Map(
       purchasedItems.map(({ id, qty }) => [String(id), Number(qty)]),
     );
-
     setLines((current) =>
       current.flatMap((item) => {
         const remainingQty =
           item.qty - (purchasedQuantities.get(String(item.id)) || 0);
-
         return remainingQty > 0 ? [{ ...item, qty: remainingQty }] : [];
       }),
     );
@@ -162,6 +200,8 @@ export function StoreProvider({ children }) {
 
   const value = {
     products,
+    productLoading,
+    productError,
     categories,
     storefront,
     refreshProducts,
@@ -177,7 +217,6 @@ export function StoreProvider({ children }) {
     removeItems,
     removePurchasedItems,
     clear,
-    // Keep the earlier context names available to existing components.
     cart: lines,
     cartTotal: total,
     cartCount: count,

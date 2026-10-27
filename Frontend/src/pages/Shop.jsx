@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import ProductCard from "../components/ProductCard.jsx";
-import { useStore } from "../context/storeContext.js";
+import { useStore } from "../context/StoreContext.js";
 
 const priceRanges = [
   { id: "any", label: "Any price", matches: () => true },
@@ -17,7 +17,14 @@ const priceRanges = [
 export default function Shop() {
   const { cat } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { products, query, categories } = useStore();
+  const {
+    products,
+    query,
+    categories,
+    productLoading,
+    productError,
+    refreshProducts,
+  } = useStore();
   const [sort, setSort] = useState("featured");
   const [priceRange, setPriceRange] = useState("any");
   const saleOnly = searchParams.get("deals") === "1";
@@ -156,14 +163,27 @@ export default function Shop() {
             <option value="high">Price: high to low</option>
           </select>
         </div>
-        {list.length ? (
+        {productLoading ? (
+          <p className="catalog-empty" role="status">Loading products…</p>
+        ) : productError ? (
+          <div className="catalog-empty" role="alert">
+            <p>{productError}</p>
+            <button type="button" className="btn outline" onClick={() => refreshProducts().catch(() => {})}>
+              Try again
+            </button>
+          </div>
+        ) : list.length ? (
           <div className="prod-grid">
             {list.map((product) => (
               <ProductCard key={product.id} p={product} />
             ))}
           </div>
         ) : (
-          <p>No products match these filters.</p>
+          <p className="catalog-empty">
+            {products.length
+              ? "No products match these filters."
+              : "There are no products available right now."}
+          </p>
         )}
       </main>
     </div>

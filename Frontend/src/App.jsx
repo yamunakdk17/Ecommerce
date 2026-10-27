@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 
-import { StoreProvider } from './context/StoreContext.jsx';
+import { StoreProvider } from './context/StoreProvider.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
 
 import RequireAuth from './components/RequireAuth.jsx';

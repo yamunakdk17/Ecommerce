@@ -9,6 +9,14 @@ const requireAdmin = require('../middleware/requireAdmin');
 // Get all products
 router.get('/', productController.getProducts);
 
+// Product reviews are public to read and require an account to submit.
+router.get('/:id/reviews', productController.getProductReviews);
+router.post(
+  '/:id/reviews',
+  requireAuth,
+  productController.submitProductReview,
+);
+
 // Get single product
 router.get('/:id', productController.getProduct);
 

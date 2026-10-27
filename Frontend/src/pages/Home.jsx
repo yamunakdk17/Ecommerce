@@ -3,8 +3,7 @@ import { Link } from "react-router-dom";
 import Hero from "../components/Hero.jsx";
 import ProductCard from "../components/ProductCard.jsx";
 import Icon from "../components/Icon.jsx";
-import { useStore } from "../context/storeContext.js";
-import { categories } from "../data/Products.js";
+import { useStore } from "../context/StoreContext.js";
 import collectionImage from "../assets/portrait-young-woman-2000s-fashion-style.jpg";
 
 const perks = [
@@ -15,13 +14,19 @@ const perks = [
 ];
 
 export default function Home() {
-  const { products } = useStore();
+  const {
+    products,
+    categories,
+    productLoading,
+    productError,
+    refreshProducts,
+  } = useStore();
   const [email, setEmail] = useState("");
   const [done, setDone] = useState(false);
   const deals = products.filter((p) => p.oldPrice).slice(0, 5);
   const bestSellers = [...products]
-    .filter((p) => p.rating != null)
-    .sort((a, b) => b.rating - a.rating)
+    .filter((p) => p.rating != null && p.reviewCount > 0)
+    .sort((a, b) => b.rating - a.rating || b.reviewCount - a.reviewCount)
     .slice(0, 5);
 
   return (
@@ -42,14 +47,29 @@ export default function Home() {
 
         <section className="section">
           <h2>Shop by category</h2>
-          <div className="cat-grid">
-            {categories.map((c) => (
-              <Link key={c.slug} to={"/shop/" + c.slug} className="cat-card">
-                <img src={c.image} alt={c.name} />
-                <span>{c.name}</span>
-              </Link>
-            ))}
-          </div>
+          {productLoading ? (
+            <p className="catalog-empty" role="status">Loading categories…</p>
+          ) : productError ? (
+            <p className="catalog-empty" role="alert">{productError}</p>
+          ) : categories.length ? (
+            <div className="cat-grid">
+              {categories.map((c) => (
+                <Link key={c.slug} to={"/shop/" + c.slug} className="cat-card">
+                  <img
+                    src={c.image || "/product-placeholder.svg"}
+                    alt={c.name}
+                    onError={(event) => {
+                      event.currentTarget.onerror = null;
+                      event.currentTarget.src = "/product-placeholder.svg";
+                    }}
+                  />
+                  <span>{c.name}</span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="catalog-empty">Product categories will appear here.</p>
+          )}
         </section>
 
         <section className="section">
@@ -57,11 +77,19 @@ export default function Home() {
             <h2>Today’s deals</h2>
             <Link to="/shop?deals=1">See all deals</Link>
           </div>
-          <div className="row">
-            {deals.map((p) => (
-              <ProductCard key={p.id} p={p} showAddToCart={false} />
-            ))}
-          </div>
+          {productLoading ? (
+            <p className="catalog-empty" role="status">Loading deals…</p>
+          ) : productError ? (
+            <p className="catalog-empty" role="alert">{productError}</p>
+          ) : deals.length ? (
+            <div className="row">
+              {deals.map((p) => (
+                <ProductCard key={p.id} p={p} showAddToCart={false} />
+              ))}
+            </div>
+          ) : (
+            <p className="catalog-empty">There are no discounted products right now.</p>
+          )}
         </section>
 
         <section className="section">
@@ -69,11 +97,21 @@ export default function Home() {
             <h2>Top rated</h2>
             <Link to="/shop">Browse all products</Link>
           </div>
-          <div className="row">
-            {bestSellers.map((p) => (
-              <ProductCard key={p.id} p={p} showAddToCart={false} />
-            ))}
-          </div>
+          {productLoading ? (
+            <p className="catalog-empty" role="status">Loading ratings…</p>
+          ) : productError ? (
+            <p className="catalog-empty" role="alert">{productError}</p>
+          ) : bestSellers.length ? (
+            <div className="row">
+              {bestSellers.map((p) => (
+                <ProductCard key={p.id} p={p} showAddToCart={false} />
+              ))}
+            </div>
+          ) : (
+            <p className="catalog-empty">
+              No customer ratings yet. Products will appear here after customers review them.
+            </p>
+          )}
         </section>
 
         <section className="promo">
@@ -90,11 +128,24 @@ export default function Home() {
 
         <section className="section">
           <h2>Just for you</h2>
-          <div className="prod-grid">
-            {products.map((p) => (
-              <ProductCard key={p.id} p={p} showAddToCart={false} />
-            ))}
-          </div>
+          {productLoading ? (
+            <p className="catalog-empty" role="status">Loading products…</p>
+          ) : productError ? (
+            <div className="catalog-empty" role="alert">
+              <p>{productError}</p>
+              <button type="button" className="btn outline" onClick={() => refreshProducts().catch(() => {})}>
+                Try again
+              </button>
+            </div>
+          ) : products.length ? (
+            <div className="prod-grid">
+              {products.map((p) => (
+                <ProductCard key={p.id} p={p} showAddToCart={false} />
+              ))}
+            </div>
+          ) : (
+            <p className="catalog-empty">There are no products available right now.</p>
+          )}
         </section>
 
         <section className="news">

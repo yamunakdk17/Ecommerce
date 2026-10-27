@@ -1,5 +1,5 @@
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { useStore } from "../context/storeContext.js";
+import { useStore } from "../context/StoreContext.js";
 import { useAuth } from "../context/authContext.js";
 import Icon from "./Icon.jsx";
 import logo from "../assets/idTO7v6m3N_logos.png";

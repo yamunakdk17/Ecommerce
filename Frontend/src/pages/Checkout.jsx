@@ -118,7 +118,6 @@ export default function Checkout() {
 
 const token = ls.get('bm_token');
 
-
    if (!token || token.startsWith('demo:')) {
      throw new Error('Please log in before making a Khalti payment.');
    }

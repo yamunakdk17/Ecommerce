@@ -109,10 +109,11 @@ const lookupKhaltiPayment = async ({ pidx }) => {
   const response = await fetch(process.env.KHALTI_LOOKUP_URL, {
     method: 'POST',
 
-    headers: {
-      Authorization: `Key ${secretKey}`,
-      'Content-Type': 'application/json',
-    },
+  headers: {
+  Authorization: `Key ${process.env.KHALTI_SECRET_KEY}`,
+  'Content-Type': 'application/json',
+},
+
 
     body: JSON.stringify({
       pidx,

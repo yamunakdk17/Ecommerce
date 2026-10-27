@@ -105,6 +105,8 @@ const decodeEsewaResponse = (encodedData) => {
  */
 const generateResponseSignature = (data) => {
   const signedFieldNames = data.signed_field_names;
+
+  console.log(signedFieldNames);
   const allowedFields = new Set([
     'transaction_code',
     'status',
@@ -112,12 +114,7 @@ const generateResponseSignature = (data) => {
     'transaction_uuid',
     'product_code',
   ]);
-  const requiredFields = [
-    'status',
-    'total_amount',
-    'transaction_uuid',
-    'product_code',
-  ];
+  const requiredFields = ['status', 'total_amount', 'transaction_uuid', 'product_code'];
 
   if (typeof signedFieldNames !== 'string' || !signedFieldNames) {
     const error = new Error('eSewa signed_field_names is missing');

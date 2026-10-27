@@ -129,6 +129,39 @@ export default function Checkout() {
         await startEsewaPayment(order);
         return;
       }
+      if (paymentMethod === 'KHALTI') {
+        const response = await fetch(`${API_URL}/payments/khalti/initiate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            orderId: order.id,
+            amount: order.total,
+            customer: {
+              name: customer.name,
+              email: customer.email,
+              phone: customer.phone,
+            },
+            items: cartItems.map((item) => ({
+              productId: item.id,
+              name: item.name,
+              price: item.price,
+              qty: item.qty,
+            })),
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || 'Unable to start Khalti payment');
+        }
+
+        window.location.href = result.data.paymentUrl;
+      }
+
+      
 
       const items = selectedLines.map((l) => ({
         id: l.id,

@@ -2,110 +2,295 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useStore } from '../context/StoreContext.js';
 
-const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(
-  /\/+$/,
-  '',
-);
-const FAILURE_MESSAGE = 'Unable to verify the payment. Please try again.';
+const API_URL = (
+  import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+).replace(/\/+$/, '');
+
+const FAILURE_MESSAGE =
+  'Unable to verify the payment. Please try again.';
 
 export default function PaymentSuccess() {
   const [searchParams] = useSearchParams();
+
+  // eSewa returns ?data=...
   const responseData = searchParams.get('data');
+
+  // Khalti returns ?pidx=...
+  const khaltiPidx = searchParams.get('pidx');
+
   const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState({ status: 'loading', payment: null });
+
+  const [state, setState] = useState({
+    status: 'loading',
+    payment: null,
+  });
+
   const dialogRef = useRef(null);
+
   const { removePurchasedItems } = useStore();
 
+  /*
+   * Remove purchased products from cart after successful payment.
+   *
+   * The checkout page should store the purchased item IDs in:
+   * bm_pending_payment_items
+   *
+   * For backward compatibility, this also checks the old eSewa key.
+   */
   useEffect(() => {
-    if (state.status !== 'success') return;
+    if (state.status !== 'success') {
+      return;
+    }
 
     try {
-      const purchasedItems = JSON.parse(
-        sessionStorage.getItem('bm_pending_esewa_items') || '[]',
-      );
-      if (Array.isArray(purchasedItems) && purchasedItems.length) {
+      const storageKeys = [
+        'bm_pending_payment_items',
+        'bm_pending_esewa_items',
+      ];
+
+      let purchasedItems = [];
+
+      for (const key of storageKeys) {
+        const storedItems = sessionStorage.getItem(key);
+
+        if (!storedItems) {
+          continue;
+        }
+
+        try {
+          const parsedItems = JSON.parse(storedItems);
+
+          if (Array.isArray(parsedItems) && parsedItems.length) {
+            purchasedItems = parsedItems;
+            break;
+          }
+        } catch (parseError) {
+          console.error(
+            `Unable to parse ${key}:`,
+            parseError,
+          );
+        }
+      }
+
+      if (
+        Array.isArray(purchasedItems) &&
+        purchasedItems.length
+      ) {
         removePurchasedItems(purchasedItems);
       }
-      sessionStorage.removeItem('bm_pending_esewa_items');
+
+      storageKeys.forEach((key) => {
+        sessionStorage.removeItem(key);
+      });
     } catch (error) {
-      console.error('Unable to update cart after eSewa payment:', error);
+      console.error(
+        'Unable to update cart after payment:',
+        error,
+      );
     }
   }, [removePurchasedItems, state.status]);
 
+  /*
+   * Keep the payment dialog accessible.
+   */
   useEffect(() => {
     const dialog = dialogRef.current;
     const root = document.getElementById('root');
+
+    if (!dialog || !root) {
+      return undefined;
+    }
+
     const changedElements = [];
     let current = dialog;
 
-    while (current?.parentElement && current.parentElement !== root) {
+    while (
+      current?.parentElement &&
+      current.parentElement !== root
+    ) {
       for (const sibling of current.parentElement.children) {
         if (sibling !== current) {
-          changedElements.push([sibling, sibling.inert]);
+          changedElements.push([
+            sibling,
+            sibling.inert,
+          ]);
+
           sibling.inert = true;
         }
       }
+
       current = current.parentElement;
     }
 
     if (current?.parentElement === root) {
       for (const sibling of root.children) {
         if (sibling !== current) {
-          changedElements.push([sibling, sibling.inert]);
+          changedElements.push([
+            sibling,
+            sibling.inert,
+          ]);
+
           sibling.inert = true;
         }
       }
     }
 
     return () => {
-      changedElements.forEach(([element, wasInert]) => {
-        element.inert = wasInert;
-      });
+      changedElements.forEach(
+        ([element, wasInert]) => {
+          element.inert = wasInert;
+        },
+      );
     };
   }, []);
 
+  /*
+   * Verify payment.
+   *
+   * eSewa:
+   *   /payment-success?data=...
+   *
+   * Khalti:
+   *   /payment-success?pidx=...
+   */
   useEffect(() => {
     let cancelled = false;
 
     const verifyPayment = async () => {
       try {
-        if (!responseData) {
-          throw new Error('Missing eSewa response data');
+        /*
+         * =====================================================
+         * KHALTI PAYMENT
+         * =====================================================
+         */
+        if (khaltiPidx) {
+          const response = await fetch(
+            `${API_URL}/payments/khalti/verify`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                pidx: khaltiPidx,
+              }),
+            },
+          );
+
+          const responseText =
+            await response.text();
+
+          let result;
+
+          try {
+            result = JSON.parse(responseText);
+          } catch {
+            throw new Error(
+              'Backend returned a non-JSON payment response.',
+            );
+          }
+
+          if (
+            !response.ok ||
+            !result.success ||
+            result.paymentStatus !== 'COMPLETE' ||
+            !result.data
+          ) {
+            throw new Error(
+              result.message ||
+                'Khalti payment verification failed.',
+            );
+          }
+
+          if (!cancelled) {
+            setState({
+              status: 'success',
+              payment: {
+                ...result.data,
+                paymentMethod: 'KHALTI',
+              },
+            });
+          }
+
+          return;
         }
 
-        const response = await fetch(`${API_URL}/payments/esewa/verify`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ data: responseData }),
-        });
-        const responseText = await response.text();
-        let result;
+        /*
+         * =====================================================
+         * ESEWA PAYMENT
+         * =====================================================
+         */
+        if (responseData) {
+          const response = await fetch(
+            `${API_URL}/payments/esewa/verify`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                data: responseData,
+              }),
+            },
+          );
 
-        try {
-          result = JSON.parse(responseText);
-        } catch {
-          throw new Error('Backend returned a non-JSON payment response');
+          const responseText =
+            await response.text();
+
+          let result;
+
+          try {
+            result = JSON.parse(responseText);
+          } catch {
+            throw new Error(
+              'Backend returned a non-JSON payment response.',
+            );
+          }
+
+          if (
+            !response.ok ||
+            !result.success ||
+            result.paymentStatus !== 'COMPLETE' ||
+            !result.data
+          ) {
+            throw new Error(
+              result.message ||
+                'eSewa payment verification failed.',
+            );
+          }
+
+          if (!cancelled) {
+            setState({
+              status: 'success',
+              payment: {
+                ...result.data,
+                paymentMethod: 'ESEWA',
+              },
+            });
+          }
+
+          return;
         }
 
-        if (
-          !response.ok ||
-          !result.success ||
-          result.paymentStatus !== 'COMPLETE' ||
-          !result.data
-        ) {
-          throw new Error(result.message || 'Payment verification failed');
-        }
-
-        if (!cancelled) {
-          setState({ status: 'success', payment: result.data });
-        }
+        /*
+         * =====================================================
+         * NO PAYMENT RESPONSE
+         * =====================================================
+         */
+        throw new Error(
+          'No payment response was received.',
+        );
       } catch (error) {
-        console.error('eSewa payment verification failed:', error);
+        console.error(
+          'Payment verification failed:',
+          error,
+        );
 
         if (!cancelled) {
-          setState({ status: 'failed', payment: null });
+          setState({
+            status: 'failed',
+            payment: null,
+          });
         }
       }
     };
@@ -115,10 +300,40 @@ export default function PaymentSuccess() {
     return () => {
       cancelled = true;
     };
-  }, [responseData, attempt]);
+  }, [responseData, khaltiPidx, attempt]);
 
   const isLoading = state.status === 'loading';
   const isSuccess = state.status === 'success';
+
+  const payment = state.payment;
+
+  /*
+   * Work with both providers.
+   *
+   * eSewa:
+   *   amount
+   *   transactionUuid
+   *   transactionCode
+   *
+   * Khalti:
+   *   amount
+   *   pidx
+   *   transactionId
+   */
+  const paymentAmount = payment?.amount ?? '—';
+
+  const transactionId =
+    payment?.transactionUuid ||
+    payment?.pidx ||
+    '—';
+
+  const transactionCode =
+    payment?.transactionCode ||
+    payment?.transactionId ||
+    '—';
+
+  const paymentMethod =
+    payment?.paymentMethod || '';
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/45 px-5 py-5 backdrop-blur-[7px]">
@@ -130,6 +345,7 @@ export default function PaymentSuccess() {
         aria-labelledby="payment-title"
         aria-describedby="payment-message"
       >
+        {/* Payment status icon */}
         <div
           className={`mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full text-3xl font-bold ${
             isLoading
@@ -140,9 +356,14 @@ export default function PaymentSuccess() {
           }`}
           aria-hidden="true"
         >
-          {isLoading ? '↻' : isSuccess ? '✓' : '✕'}
+          {isLoading
+            ? '↻'
+            : isSuccess
+              ? '✓'
+              : '✕'}
         </div>
 
+        {/* Title */}
         <h1
           id="payment-title"
           className="mb-2 text-2xl font-bold tracking-tight text-slate-900"
@@ -154,6 +375,7 @@ export default function PaymentSuccess() {
               : 'Payment Failed'}
         </h1>
 
+        {/* Message */}
         <p
           id="payment-message"
           className="mx-auto mb-6 max-w-sm text-sm leading-6 text-slate-600"
@@ -165,31 +387,60 @@ export default function PaymentSuccess() {
               : FAILURE_MESSAGE}
         </p>
 
-        {isSuccess && state.payment && (
+        {/* Payment details */}
+        {isSuccess && payment && (
           <dl className="mb-6 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left">
+            {/* Payment method */}
             <div>
-              <dt className="text-xs font-medium text-slate-500">Amount Paid</dt>
-              <dd className="mt-1 break-all text-sm font-semibold text-slate-900">
-                Rs. {state.payment.amount}
+              <dt className="text-xs font-medium text-slate-500">
+                Payment Method
+              </dt>
+
+              <dd className="mt-1 text-sm font-semibold text-slate-900">
+                {paymentMethod === 'KHALTI'
+                  ? 'Khalti'
+                  : paymentMethod === 'ESEWA'
+                    ? 'eSewa'
+                    : paymentMethod || 'Online Payment'}
               </dd>
             </div>
+
+            {/* Amount */}
             <div className="border-t border-slate-200 pt-3">
-              <dt className="text-xs font-medium text-slate-500">Transaction ID</dt>
+              <dt className="text-xs font-medium text-slate-500">
+                Amount Paid
+              </dt>
+
               <dd className="mt-1 break-all text-sm font-semibold text-slate-900">
-                {state.payment.transactionUuid}
+                Rs. {paymentAmount}
               </dd>
             </div>
+
+            {/* Transaction ID */}
+            <div className="border-t border-slate-200 pt-3">
+              <dt className="text-xs font-medium text-slate-500">
+                Transaction ID
+              </dt>
+
+              <dd className="mt-1 break-all text-sm font-semibold text-slate-900">
+                {transactionId}
+              </dd>
+            </div>
+
+            {/* Transaction code */}
             <div className="border-t border-slate-200 pt-3">
               <dt className="text-xs font-medium text-slate-500">
                 Transaction Code
               </dt>
+
               <dd className="mt-1 break-all text-sm font-semibold text-slate-900">
-                {state.payment.transactionCode || '—'}
+                {transactionCode}
               </dd>
             </div>
           </dl>
         )}
 
+        {/* Buttons */}
         {!isLoading && (
           <div className="flex flex-col gap-3">
             {isSuccess ? (
@@ -203,8 +454,15 @@ export default function PaymentSuccess() {
               <button
                 type="button"
                 onClick={() => {
-                  setState({ status: 'loading', payment: null });
-                  setAttempt((currentAttempt) => currentAttempt + 1);
+                  setState({
+                    status: 'loading',
+                    payment: null,
+                  });
+
+                  setAttempt(
+                    (currentAttempt) =>
+                      currentAttempt + 1,
+                  );
                 }}
                 className="inline-flex min-h-12 items-center justify-center rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700"
               >

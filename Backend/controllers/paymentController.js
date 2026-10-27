@@ -4,6 +4,7 @@ const {
   verifyEsewaPaymentResponse,
   checkEsewaTransactionStatus,
 } = require('../services/esewaService');
+
 const orderService = require('../services/orderService');
 
 /*
@@ -13,8 +14,10 @@ const orderService = require('../services/orderService');
 */
 const initiateEsewaPayment = async (req, res, next) => {
   let orderId;
+
   try {
     const { amount, orderId: requestedOrderId } = req.body || {};
+
     orderId = requestedOrderId;
 
     if (!amount || !orderId || !req.user) {
@@ -45,14 +48,19 @@ const initiateEsewaPayment = async (req, res, next) => {
       try {
         await orderService.cancelUnpaidOrder(orderId, req.user.id);
       } catch (cleanupError) {
-        console.error('Unable to release stock for failed eSewa initiation:', cleanupError);
+        console.error(
+          'Unable to release stock for failed eSewa initiation:',
+          cleanupError,
+        );
       }
     }
+
     next(error);
   }
 };
 
 /*
+
 | Verify eSewa Payment
 
 */
@@ -67,38 +75,13 @@ const verifyEsewaPayment = async (req, res, next) => {
       });
     }
 
-    /*
-     * STEP 1
-     *
-     * Send the Base64 response to the eSewa service.
-     *
-     * The service will:
-     * - decode Base64
-     * - convert it into JSON
-     * - verify the eSewa signature
-     * - verify the product code
-     *
-     * It returns verified transaction information.
-     */
     const verifiedPayment = verifyEsewaPaymentResponse(data);
 
-    /*
-     * STEP 2
-     *
-     * Ask eSewa directly for the transaction status.
-     */
     const status = await checkEsewaTransactionStatus({
       transactionUuid: verifiedPayment.transactionUuid,
-
       totalAmount: verifiedPayment.totalAmount,
     });
 
-    /*
-     * STEP 3
-     *
-     * eSewa says COMPLETE
-     * = payment successful.
-     */
     if (status.status === 'COMPLETE') {
       await orderService.completeEsewaOrder({
         transactionUuid: verifiedPayment.transactionUuid,
@@ -108,13 +91,10 @@ const verifyEsewaPayment = async (req, res, next) => {
 
       return res.status(200).json({
         success: true,
-
         paymentStatus: 'COMPLETE',
-
         message: 'Payment successful',
-
         data: {
-          transactionCode: verifiedPayment.transactionCode,
+          transactionCode: status.transactionCode || verifiedPayment.transactionCode,
 
           transactionUuid: verifiedPayment.transactionUuid,
 
@@ -123,31 +103,17 @@ const verifyEsewaPayment = async (req, res, next) => {
       });
     }
 
-    /*
-     * STEP 4
-     *
-     * Payment is not COMPLETE.
-     *
-     * Examples:
-     * PENDING
-     * CANCELED
-     * NOT_FOUND
-     * AMBIGUOUS
-     */
-     if (
-       status.status !== 'COMPLETE' &&
-       ['CANCELED', 'CANCELLED', 'FAILED', 'NOT_FOUND'].includes(status.status)
-     ) {
-       await orderService.failEsewaOrder(verifiedPayment.transactionUuid);
-     }
+    if (['CANCELED', 'CANCELLED', 'FAILED', 'NOT_FOUND'].includes(status.status)) {
+      await orderService.failEsewaOrder(verifiedPayment.transactionUuid);
+    }
 
-     return res.status(200).json({
+    return res.status(200).json({
       success: false,
-
       paymentStatus: status.status || 'FAILED',
-
-      message: 'Payment was not completed',
-
+      message:
+        status.status === 'PENDING'
+          ? 'Payment is still pending'
+          : 'Payment was not completed',
       data: {
         transactionUuid: verifiedPayment.transactionUuid,
 
@@ -155,11 +121,189 @@ const verifyEsewaPayment = async (req, res, next) => {
       },
     });
   } catch (error) {
+    console.error('eSewa payment verification error:', error);
+
     next(error);
   }
 };
 
+/*
+
+| Initiate Khalti Payment
+
+*/
+const initiateKhaltiPayment = async (req, res, next) => {
+  let orderId;
+
+  try {
+    const { orderId: requestedOrderId, amount, customer, items } = req.body || {};
+
+    orderId = requestedOrderId;
+
+    if (!orderId || !req.user) {
+      return res.status(400).json({
+        success: false,
+        message: 'An authenticated order is required',
+      });
+    }
+
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment amount must be greater than 0',
+      });
+    }
+
+    /*
+     * STEP 1
+     *
+     * Create Khalti payment.
+     */
+    const payment = await paymentService.initiateKhaltiPayment({
+      orderId,
+      amount,
+      customer,
+      items,
+    });
+
+    /*
+     * STEP 2
+     *
+     * Save Khalti pidx against the order.
+     *
+     * This allows the backend to connect the
+     * Khalti payment with the correct order.
+     */
+    await orderService.setKhaltiTransaction(orderId, req.user.id, payment.pidx, amount);
+
+    /*
+     * STEP 3
+     *
+     * Send payment URL back to frontend.
+     */
+    return res.status(200).json({
+      success: true,
+      message: 'Khalti payment initialized successfully',
+      data: payment,
+    });
+  } catch (error) {
+    if (orderId && req.user) {
+      try {
+        await orderService.cancelUnpaidOrder(orderId, req.user.id);
+      } catch (cleanupError) {
+        console.error(
+          'Unable to release stock for failed Khalti initiation:',
+          cleanupError,
+        );
+      }
+    }
+
+    next(error);
+  }
+};
+
+/*
+
+| Verify Khalti Payment
+
+*/
+const verifyKhaltiPayment = async (req, res, next) => {
+  try {
+    const { pidx } = req.body || {};
+
+    if (!pidx) {
+      return res.status(400).json({
+        success: false,
+        message: 'Khalti payment ID is required',
+      });
+    }
+
+    /*
+     * Ask Khalti directly for the payment status.
+     */
+    const result = await paymentService.lookupKhaltiPayment({
+      pidx,
+    });
+
+    console.log('Khalti payment lookup:', result);
+
+    /*
+     * PAYMENT SUCCESS
+     */
+    if (result.status === 'Completed') {
+      const amount = Number(result.total_amount) / 100;
+
+      /*
+       * Complete the order in MySQL.
+       */
+      await orderService.completeKhaltiOrder({
+        pidx: result.pidx || pidx,
+
+        transactionId: result.transaction_id || null,
+
+        totalAmount: amount,
+
+        purchaseOrderId: result.purchase_order_id || null,
+      });
+
+      return res.status(200).json({
+        success: true,
+        paymentStatus: 'COMPLETE',
+        message: 'Payment successful',
+
+        data: {
+          pidx: result.pidx || pidx,
+
+          transactionId: result.transaction_id || null,
+
+          amount,
+        },
+      });
+    }
+
+    /*
+     * PAYMENT FAILED / EXPIRED / CANCELED
+     */
+    if (['Failed', 'Expired', 'Canceled', 'Cancelled'].includes(result.status)) {
+      await orderService.failKhaltiOrder(result.pidx || pidx);
+    }
+
+    /*
+     * PENDING OR OTHER STATUS
+     */
+    return res.status(200).json({
+      success: false,
+
+      paymentStatus: result.status || 'FAILED',
+
+      message:
+        result.status === 'Pending'
+          ? 'Payment is still pending'
+          : 'Payment was not completed',
+
+      data: {
+        pidx: result.pidx || pidx,
+
+        transactionId: result.transaction_id || null,
+
+        status: result.status,
+      },
+    });
+  } catch (error) {
+    console.error('Khalti payment verification error:', error);
+
+    next(error);
+  }
+};
+
+/*
+
+| Exports
+
+*/
 module.exports = {
   initiateEsewaPayment,
   verifyEsewaPayment,
+  initiateKhaltiPayment,
+  verifyKhaltiPayment,
 };

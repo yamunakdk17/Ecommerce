@@ -15,7 +15,12 @@ const ensureOrderColumns = async () => {
     ['promo_code', 'VARCHAR(50) NULL'],
     ['transaction_uuid', 'VARCHAR(100) NULL'],
     ['transaction_code', 'VARCHAR(100) NULL'],
-    ['updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
+    ['khalti_pidx', 'VARCHAR(100) NULL UNIQUE'],
+    ['khalti_transaction_id', 'VARCHAR(150) NULL'],
+    [
+      'updated_at',
+      'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+    ],
   ];
 
   for (const [name, definition] of missing) {
@@ -56,6 +61,8 @@ const ensureOrderColumns = async () => {
       order_id INT NOT NULL,
       transaction_uuid VARCHAR(255) NULL UNIQUE,
       transaction_code VARCHAR(255) NULL,
+      khalti_pidx VARCHAR(100) NULL UNIQUE,
+      khalti_transaction_id VARCHAR(150) NULL,
       amount DECIMAL(10, 2) NOT NULL,
       payment_method VARCHAR(50) NOT NULL,
       status VARCHAR(50) NULL DEFAULT 'PENDING',
@@ -163,12 +170,13 @@ const createOrder = async (
     throw error;
   }
 
-  const method = String(paymentMethod).toUpperCase();
-  if (!['COD', 'ESEWA'].includes(method)) {
-    const error = new Error('Unsupported payment method');
-    error.statusCode = 400;
-    throw error;
-  }
+const method = String(paymentMethod).toUpperCase();
+
+if (!['COD', 'ESEWA', 'KHALTI'].includes(method)) {
+  const error = new Error('Unsupported payment method');
+  error.statusCode = 400;
+  throw error;
+}
 
   const customerName =
     typeof customer.name === 'string' ? customer.name.trim() : '';
@@ -496,6 +504,198 @@ const completeEsewaOrder = async ({
     connection.release();
   }
 };
+const setKhaltiTransaction = async (orderId, userId, pidx, totalAmount) => {
+  await ensureTables();
+
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [orders] = await connection.query(
+      `SELECT id, total
+       FROM orders
+       WHERE id = ?
+         AND user_id = ?
+         AND payment_method = 'KHALTI'
+         AND order_status = 'awaiting_payment'
+         AND payment_status = 'pending'
+         AND total = ?
+       FOR UPDATE`,
+      [orderId, userId, Number(totalAmount).toFixed(2)],
+    );
+
+    if (!orders[0]) {
+      const error = new Error('Order cannot accept a Khalti transaction');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    await connection.query(
+      `UPDATE orders
+       SET khalti_pidx = ?
+       WHERE id = ?`,
+      [pidx, orderId],
+    );
+
+    await connection.query(
+      `INSERT INTO payments
+        (
+          order_id,
+          khalti_pidx,
+          amount,
+          payment_method,
+          status
+        )
+       VALUES (?, ?, ?, 'KHALTI', 'PENDING')
+       ON DUPLICATE KEY UPDATE
+         khalti_pidx = VALUES(khalti_pidx),
+         amount = VALUES(amount),
+         payment_method = 'KHALTI',
+         status = 'PENDING'`,
+      [orderId, pidx, Number(totalAmount).toFixed(2)],
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+};
+
+const completeKhaltiOrder = async ({ pidx, transactionId, totalAmount }) => {
+  await ensureTables();
+
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [orders] = await connection.query(
+      `SELECT id
+       FROM orders
+       WHERE khalti_pidx = ?
+         AND total = ?
+         AND payment_method = 'KHALTI'
+         AND payment_status = 'pending'
+         AND order_status = 'awaiting_payment'
+       FOR UPDATE`,
+      [pidx, Number(totalAmount).toFixed(2)],
+    );
+
+    if (!orders[0]) {
+      const error = new Error('No matching pending Khalti order was found');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const orderId = orders[0].id;
+
+    await connection.query(
+      `UPDATE orders
+       SET
+         payment_status = 'paid',
+         order_status = 'pending',
+         khalti_transaction_id = ?
+       WHERE id = ?`,
+      [transactionId || null, orderId],
+    );
+
+    await connection.query(
+      `UPDATE payments
+       SET
+         status = 'COMPLETE',
+         khalti_transaction_id = ?
+       WHERE order_id = ?
+         AND khalti_pidx = ?`,
+      [transactionId || null, orderId, pidx],
+    );
+
+    await connection.commit();
+
+    return {
+      orderId,
+      pidx,
+      transactionId: transactionId || null,
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+};
+
+const failKhaltiOrder = async (pidx) => {
+  await ensureTables();
+
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [orders] = await connection.query(
+      `SELECT id
+       FROM orders
+       WHERE khalti_pidx = ?
+         AND payment_method = 'KHALTI'
+         AND payment_status = 'pending'
+         AND order_status = 'awaiting_payment'
+       FOR UPDATE`,
+      [pidx],
+    );
+
+    if (!orders[0]) {
+      await connection.rollback();
+      return;
+    }
+
+    const orderId = orders[0].id;
+
+    const [items] = await connection.query(
+      `SELECT product_id AS productId,
+              quantity AS qty
+       FROM order_items
+       WHERE order_id = ?`,
+      [orderId],
+    );
+
+    for (const item of items) {
+      await connection.query(
+        `UPDATE products
+         SET stock = stock + ?
+         WHERE id = ?`,
+        [item.qty, item.productId],
+      );
+    }
+
+    await connection.query(
+      `UPDATE orders
+       SET
+         order_status = 'cancelled',
+         payment_status = 'failed'
+       WHERE id = ?`,
+      [orderId],
+    );
+
+    await connection.query(
+      `UPDATE payments
+       SET status = 'FAILED'
+       WHERE order_id = ?
+         AND khalti_pidx = ?`,
+      [orderId, pidx],
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+};
 
 module.exports = {
   ensureTables,
@@ -506,4 +706,8 @@ module.exports = {
   cancelUnpaidOrder,
   failEsewaOrder,
   completeEsewaOrder,
+  setKhaltiTransaction,
+  completeKhaltiOrder,
+  failKhaltiOrder,
 };
+

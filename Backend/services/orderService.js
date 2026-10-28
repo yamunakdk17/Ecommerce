@@ -569,6 +569,12 @@ const setKhaltiTransaction = async (orderId, userId, pidx, totalAmount) => {
   try {
     await connection.beginTransaction();
 
+    if (!pidx) {
+      const error = new Error('Khalti payment ID was not returned');
+      error.statusCode = 502;
+      throw error;
+    }
+
     const [orders] = await connection.query(
       `SELECT id, total
        FROM orders
@@ -577,9 +583,8 @@ const setKhaltiTransaction = async (orderId, userId, pidx, totalAmount) => {
          AND payment_method = 'KHALTI'
          AND order_status = 'awaiting_payment'
          AND payment_status = 'pending'
-         AND total = ?
        FOR UPDATE`,
-      [orderId, userId, Number(totalAmount).toFixed(2)],
+      [orderId, userId],
     );
 
     if (!orders[0]) {
@@ -588,12 +593,27 @@ const setKhaltiTransaction = async (orderId, userId, pidx, totalAmount) => {
       throw error;
     }
 
-    await connection.query(
+    const orderTotal = Number(orders[0].total);
+    const paymentTotal = Number(totalAmount);
+
+    if (Math.abs(orderTotal - paymentTotal) > 0.01) {
+      const error = new Error('Khalti payment amount does not match the order total');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const [updateResult] = await connection.query(
       `UPDATE orders
        SET khalti_pidx = ?
        WHERE id = ?`,
       [pidx, orderId],
     );
+
+    if (updateResult.affectedRows !== 1) {
+      const error = new Error('Khalti payment ID could not be saved to the order');
+      error.statusCode = 409;
+      throw error;
+    }
 
     await connection.query(
       `INSERT INTO payments
@@ -610,7 +630,7 @@ const setKhaltiTransaction = async (orderId, userId, pidx, totalAmount) => {
          amount = VALUES(amount),
          payment_method = 'KHALTI',
          status = 'PENDING'`,
-      [orderId, pidx, Number(totalAmount).toFixed(2)],
+      [orderId, pidx, paymentTotal.toFixed(2)],
     );
 
     await connection.commit();
@@ -622,6 +642,7 @@ const setKhaltiTransaction = async (orderId, userId, pidx, totalAmount) => {
   }
 };
 
+
 const completeKhaltiOrder = async ({ pidx, transactionId, totalAmount }) => {
   await ensureTables();
 
@@ -630,25 +651,67 @@ const completeKhaltiOrder = async ({ pidx, transactionId, totalAmount }) => {
   try {
     await connection.beginTransaction();
 
+    const paymentTotal = Number(totalAmount);
+
     const [orders] = await connection.query(
-      `SELECT id
+      `SELECT
+         id,
+         total,
+         payment_status,
+         order_status,
+         khalti_pidx,
+         khalti_transaction_id
        FROM orders
        WHERE khalti_pidx = ?
-         AND total = ?
          AND payment_method = 'KHALTI'
-         AND payment_status = 'pending'
-         AND order_status = 'awaiting_payment'
        FOR UPDATE`,
-      [pidx, Number(totalAmount).toFixed(2)],
+      [pidx],
     );
 
     if (!orders[0]) {
-      const error = new Error('No matching pending Khalti order was found');
+      const error = new Error('No matching Khalti order was found');
       error.statusCode = 409;
       throw error;
     }
 
-    const orderId = orders[0].id;
+    const order = orders[0];
+
+    if (Math.abs(Number(order.total) - paymentTotal) > 0.01) {
+      const error = new Error('Khalti payment amount does not match the order total');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    /*
+     * Khalti verification can be called more than once.
+     * If the order is already paid, return the existing result
+     * instead of treating the second verification as an error.
+     */
+    if (order.payment_status === 'paid') {
+      await connection.query(
+        `UPDATE payments
+         SET
+           status = 'COMPLETE',
+           khalti_transaction_id = COALESCE(?, khalti_transaction_id)
+         WHERE order_id = ?
+           AND khalti_pidx = ?`,
+        [transactionId || null, order.id, pidx],
+      );
+
+      await connection.commit();
+
+      return {
+        orderId: order.id,
+        pidx,
+        transactionId: transactionId || order.khalti_transaction_id || null,
+      };
+    }
+
+    if (order.payment_status !== 'pending' || order.order_status !== 'awaiting_payment') {
+      const error = new Error('Khalti order is not in a payable state');
+      error.statusCode = 409;
+      throw error;
+    }
 
     await connection.query(
       `UPDATE orders
@@ -657,7 +720,7 @@ const completeKhaltiOrder = async ({ pidx, transactionId, totalAmount }) => {
          order_status = 'pending',
          khalti_transaction_id = ?
        WHERE id = ?`,
-      [transactionId || null, orderId],
+      [transactionId || null, order.id],
     );
 
     await connection.query(
@@ -667,13 +730,13 @@ const completeKhaltiOrder = async ({ pidx, transactionId, totalAmount }) => {
          khalti_transaction_id = ?
        WHERE order_id = ?
          AND khalti_pidx = ?`,
-      [transactionId || null, orderId, pidx],
+      [transactionId || null, order.id, pidx],
     );
 
     await connection.commit();
 
     return {
-      orderId,
+      orderId: order.id,
       pidx,
       transactionId: transactionId || null,
     };

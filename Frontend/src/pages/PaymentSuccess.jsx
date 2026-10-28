@@ -18,7 +18,6 @@ export default function PaymentSuccess() {
   // Khalti returns ?pidx=...
   const khaltiPidx = searchParams.get('pidx');
 
-  const [attempt, setAttempt] = useState(0);
 
   const [state, setState] = useState({
     status: 'loading',
@@ -27,6 +26,7 @@ export default function PaymentSuccess() {
 
   const dialogRef = useRef(null);
 
+const verificationStartedRef = useRef(false);
   const { removePurchasedItems } = useStore();
 
   /*
@@ -134,20 +134,73 @@ export default function PaymentSuccess() {
     let cancelled = false;
 
     const verifyPayment = async () => {
+      if (verificationStartedRef.current) {
+        return;
+      }
+
+      verificationStartedRef.current = true;
+
       try {
+
+       if (khaltiPidx) {
+  const response = await fetch(`${API_URL}/payments/khalti/verify`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      pidx: khaltiPidx,
+    }),
+  });
+
+  const responseText = await response.text();
+
+  let result;
+
+  try {
+    result = JSON.parse(responseText);
+  } catch {
+    throw new Error('Backend returned a non-JSON payment response.');
+  }
+
+  if (
+    !response.ok ||
+    !result.success ||
+    result.paymentStatus !== 'COMPLETE' ||
+    !result.data
+  ) {
+    throw new Error(
+      result.message || 'Khalti payment verification failed.',
+    );
+  }
+
+  if (!cancelled) {
+    setState({
+      status: 'success',
+      payment: {
+        ...result.data,
+        paymentMethod: 'KHALTI',
+      },
+    });
+  }
+
+  return;
+}
+
+
+
         /*
-         * =====================================================
-         * KHALTI PAYMENT
-         * =====================================================
+         *
+         * ESEWA PAYMENT
          */
-        if (khaltiPidx) {
-          const response = await fetch(`${API_URL}/payments/khalti/verify`, {
+        if (responseData) {
+          const response = await fetch(`${API_URL}/payments/esewa/verify`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              pidx: khaltiPidx,
+              data: responseData,
             }),
           });
 
@@ -161,13 +214,24 @@ export default function PaymentSuccess() {
             throw new Error('Backend returned a non-JSON payment response.');
           }
 
-          if (
-            !response.ok ||
-            !result.success ||
-            result.paymentStatus !== 'COMPLETE' ||
-            !result.data
-          ) {
-            throw new Error(result.message || 'Khalti payment verification failed.');
+          if (!response.ok) {
+            throw new Error(result.message || `Backend error (${response.status})`);
+          }
+
+          if (!result.success) {
+            throw new Error(
+              result.message || 'Backend reported payment verification failure.',
+            );
+          }
+
+          if (result.paymentStatus !== 'COMPLETE') {
+            throw new Error(
+              `eSewa payment status is ${result.paymentStatus || 'UNKNOWN'}`,
+            );
+          }
+
+          if (!result.data) {
+            throw new Error('Payment verified but backend returned no payment data.');
           }
 
           if (!cancelled) {
@@ -175,69 +239,13 @@ export default function PaymentSuccess() {
               status: 'success',
               payment: {
                 ...result.data,
-                paymentMethod: 'KHALTI',
+                paymentMethod: 'ESEWA',
               },
             });
           }
 
           return;
         }
-
-        /*
-         *
-         * ESEWA PAYMENT
-         */
-    if (responseData) {
-      const response = await fetch(`${API_URL}/payments/esewa/verify`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          data: responseData,
-        }),
-      });
-
-      const responseText = await response.text();
-
-      let result;
-
-      try {
-        result = JSON.parse(responseText);
-      } catch {
-        throw new Error('Backend returned a non-JSON payment response.');
-      }
-
-      if (!response.ok) {
-        throw new Error(result.message || `Backend error (${response.status})`);
-      }
-
-      if (!result.success) {
-        throw new Error(
-          result.message || 'Backend reported payment verification failure.',
-        );
-      }
-
-      if (result.paymentStatus !== 'COMPLETE') {
-        throw new Error(`eSewa payment status is ${result.paymentStatus || 'UNKNOWN'}`);
-      }
-
-      if (!result.data) {
-        throw new Error('Payment verified but backend returned no payment data.');
-      }
-
-      if (!cancelled) {
-        setState({
-          status: 'success',
-          payment: {
-            ...result.data,
-            paymentMethod: 'ESEWA',
-          },
-        });
-      }
-
-      return;
-    }
         /*
          *
          * NO PAYMENT RESPONSE
@@ -261,7 +269,7 @@ export default function PaymentSuccess() {
     return () => {
       cancelled = true;
     };
-  }, [responseData, khaltiPidx, attempt]);
+  }, [responseData, khaltiPidx]);
 
   const isLoading = state.status === 'loading';
   const isSuccess = state.status === 'success';
@@ -391,12 +399,12 @@ export default function PaymentSuccess() {
               <button
                 type="button"
                 onClick={() => {
+                  verificationStartedRef.current = false;
+
                   setState({
                     status: 'loading',
                     payment: null,
                   });
-
-                  setAttempt((currentAttempt) => currentAttempt + 1);
                 }}
                 className="inline-flex min-h-12 items-center justify-center rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700">
                 Try Again
